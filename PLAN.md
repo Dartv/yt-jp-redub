@@ -2,7 +2,24 @@
 
 Self-hosted tool that dubs any YouTube video (including stream VODs) into Japanese with emotion-preserving TTS, so Japanese learners can watch the Western content they already enjoy. Everything runs locally and for free on the user's PC; the phone is just a remote and a screen.
 
-Status: planning complete (2026-10-18).
+Status: planning complete (2026-10-18). Implemented 2026-10-18; see README for usage.
+
+**Built as planned:** yt-dlp download → Parakeet ASR → segmentation → OpenAI-compatible translation → Demucs → IndexTTS-2.5 (native on Windows) → time-fit → HLS streaming with seek-aware chunk priority, held segments, head start and catch-up overlay. Also built: the player (ja/en audio, built-in subtitles), the library, `add`, the bookmarklet, LAN IP discovery, the storage cap, resume after restart, asbplayer WebSocket on PC and `<track>`/page events for Android, and the offline `process` → .mkv.
+
+**Changed deliberately** (by request or after measurement):
+- **Telegram bot:** removed; the paste box covers it.
+- **Distribution:** no `setup.ps1`/`setup.sh` and no autostart. A single CLI (`uv run yt-jp-redub setup|serve`) instead.
+- **Speed cap:** 1.25× instead of 1.5×; utterances may also slow down to 1.2×.
+- **Speaker grouping:** consecutive sentences from the same speaker are voiced as one utterance (WeSpeaker CAM++).
+- **Translation:** gets a per-line character budget so the Japanese fits the timing.
+- **yt-dlp:** a self-updating binary in `bin/` instead of a pinned package.
+- **ASR:** runs through onnx-asr with Silero VAD.
+- **Job state:** lives in SQLite (no `state.json`).
+
+**Not verified yet:**
+- Firefox on Android, and asbplayer's extension itself (both protocols were checked against its source, not run against it)
+- Linux and macOS
+- GitHub publishing (not done)
 
 ---
 
