@@ -34,7 +34,8 @@ class Worker:
         self.listeners: list[Callable[[str], None]] = []   # called with video_id on any update
         self.subs_listeners: list[Callable[[str], None]] = []  # called when full subtitles are ready
         self._wake = asyncio.Event()
-        self._docs: dict[str, LinesDoc] = {}
+        self._docs: dict[str, LinesDoc] = {}          # live docs of jobs being processed
+        self._disk_docs: dict[str, tuple[float, LinesDoc]] = {}
         self._separator = self._tts = self._translator = None
         self._pace = PaceModel()
 
@@ -58,9 +59,16 @@ class Worker:
     def doc(self, video_id: str) -> LinesDoc | None:
         if video_id in self._docs:
             return self._docs[video_id]
+        p = self.paths(video_id).lines
+        try:
+            mtime = p.stat().st_mtime
+        except FileNotFoundError:
+            return None
+        cached = self._disk_docs.get(video_id)
+        if cached and cached[0] == mtime:
+            return cached[1]
         d = self.paths(video_id).load_lines()
-        if d is not None and self.db.get_job(video_id) and self.db.get_job(video_id)["stage"] == "done":
-            self._docs[video_id] = d
+        self._disk_docs[video_id] = (mtime, d)
         return d
 
     def report_playhead(self, video_id: str, t: float) -> None:
@@ -84,7 +92,7 @@ class Worker:
             "translated": job["translated"], "total_lines": job["total_lines"],
             "chunks_done": len(done), "chunks_total": len(doc.chunks) if doc else 0,
             "chunks": [[c.start, c.end, c.id in done] for c in doc.chunks] if doc else [],
-            "subs_complete": bool(doc and job["total_lines"] and job["translated"] >= job["total_lines"]),
+            "subs_complete": bool(doc is not None and job["translated"] >= job["total_lines"]),
             "ready": bool(doc and (self.paths(video_id).hls / "video.m3u8").exists()),
             "position": self.queue_position(video_id),
         }
@@ -310,7 +318,9 @@ class Worker:
         while True:
             done = self.db.done_chunks(vid)
             # a chunk is only really done if its segment exists (data may have been removed by hand)
-            if not offline:
+            if offline:
+                done = {c for c in done if (paths.chunk_dir(c) / "dub.wav").exists()}
+            else:
                 done = {c for c in done if paths.seg("ja", c).exists()}
             if len(done) >= n:
                 return
