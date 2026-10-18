@@ -93,3 +93,27 @@ def test_vtt_and_playlist():
     assert "00:00:01.000 --> 00:00:01.500" in en  # clipped at the next cue
     pl = hls.audio_playlist(doc, "ja")
     assert "#EXT-X-TARGETDURATION:13" in pl and "ja/0001.aac" in pl and pl.strip().endswith("#EXT-X-ENDLIST")
+
+
+def test_llm_endpoint_normalization():
+    from yt_jp_redub.pipeline.translate import normalize_endpoint
+
+    root = "https://generativelanguage.googleapis.com/v1beta/openai/"
+    native = "https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent"
+    assert normalize_endpoint(native, "other") == (root, "gemma-4-31b-it")
+    assert normalize_endpoint(root, "m") == (root, "m")
+    assert normalize_endpoint("http://localhost:11434/v1/chat/completions", "m") == (
+        "http://localhost:11434/v1",
+        "m",
+    )
+
+
+def test_llm_endpoint_paste_slips():
+    import pytest
+
+    from yt_jp_redub.pipeline.translate import normalize_endpoint
+
+    slip = "LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    assert normalize_endpoint(slip, "m") == ("https://generativelanguage.googleapis.com/v1beta/openai", "m")
+    with pytest.raises(RuntimeError):
+        normalize_endpoint("not a url", "m")

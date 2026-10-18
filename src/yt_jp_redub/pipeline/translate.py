@@ -87,19 +87,36 @@ def _extract_json(text: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
+_GOOGLE_NATIVE = re.compile(
+    r"^(https://generativelanguage\.googleapis\.com/v1\w*)/models/([^/:]+)(?::\w+)?/?$"
+)
+
+
+def normalize_endpoint(base_url: str, model: str) -> tuple[str, str]:
+    """LLM_BASE_URL must be an OpenAI-compatible API root. Two common slips are fixed up instead
+    of failing: a full .../chat/completions URL, and a Google AI Studio native model URL
+    (.../models/<model>:generateContent), which maps to that service's OpenAI-compatible root."""
+    url = base_url.strip().strip("\"'")
+    if url.upper().startswith("LLM_BASE_URL="):  # the key pasted into its own value
+        url = url.split("=", 1)[1].strip().strip("\"'")
+    if not re.match(r"^https?://[^\s/]+", url):
+        raise RuntimeError(f"LLM_BASE_URL is not a URL: {url!r} (expected e.g. http://host/v1)")
+    if m := _GOOGLE_NATIVE.match(url):
+        fixed = f"{m.group(1)}/openai/"
+        log.warning("LLM_BASE_URL is a Gemini-native URL; using %s with model %s instead", fixed, m.group(2))
+        return fixed, m.group(2)
+    if url.rstrip("/").endswith("/chat/completions"):
+        return url.rstrip("/")[: -len("/chat/completions")], model
+    return url, model
+
+
 class OpenAITranslator:
     def __init__(self, base_url: str, api_key: str, model: str, cfg, system_prompt: bool = False):
         if not api_key:
             raise RuntimeError(
                 'LLM_API_KEY is not set (see .env.example), or set translate.backend = "mock".'
             )
-        if ":generateContent" in base_url or base_url.rstrip("/").endswith("/chat/completions"):
-            raise RuntimeError(
-                "LLM_BASE_URL must be the OpenAI-compatible API root, not a full endpoint URL. "
-                "For Google AI Studio use "
-                "LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ "
-                "and put the model name in LLM_MODEL."
-            )
+        base_url, model = normalize_endpoint(base_url, model)
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.key, self.model, self.cfg, self.system_prompt = api_key, model, cfg, system_prompt
         self.limiter = RateLimiter(cfg.rpm, cfg.tpm)
@@ -159,7 +176,7 @@ class OpenAITranslator:
             except (TimeoutError, _Retryable, ValueError, aiohttp.ClientError, KeyError) as e:
                 if attempt == self.cfg.max_retries:
                     raise RuntimeError(f"translation failed after retries: {e}") from e
-                log.warning("translate retry %d: %s", attempt + 1, e)
+                log.warning("translate retry %d: %s: %s", attempt + 1, type(e).__name__, str(e)[:300])
                 await asyncio.sleep(delay + random.random())
                 delay = min(delay * 2, 60)
         raise AssertionError
