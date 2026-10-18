@@ -211,20 +211,23 @@ class Worker:
         self.db.update_job(vid, total_lines=len(doc.lines),
                            translated=sum(1 for l in doc.lines if l.ja))
         subs.write_all(doc, paths.subs)
-        if not offline:
-            await asyncio.to_thread(hls.encode_en_segments, paths, doc)
         self._notify(vid)
 
-        # 3. translation (whole video, priority-ordered) and dubbing (per chunk) run together
+        # 3. translation (whole video, priority-ordered), dubbing (per chunk) and the
+        #    original-audio rendition run together
         if any(not l.ja for l in doc.lines):
             self._set_stage(vid, "translating")
-        trans = asyncio.create_task(self._translate_all(vid, doc))
+        tasks = [asyncio.create_task(self._translate_all(vid, doc))]
+        if not offline:
+            tasks.append(asyncio.create_task(asyncio.to_thread(hls.encode_en_segments, paths, doc)))
         try:
-            await self._dub_all(vid, doc, trans, offline)
-            await trans
+            await self._dub_all(vid, doc, tasks[0], offline)
+            for t in tasks:
+                await t
         finally:
-            if not trans.done():
-                trans.cancel()
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
         self._set_stage(vid, "done")
         if not offline:
             self._cleanup(paths)
@@ -276,24 +279,54 @@ class Worker:
             self._subs_ready(vid)
             return
         translator = self._get_translator()
-        while True:
-            todo_chunks = [c for c in self.sched.order(vid, len(doc.chunks))
-                           if any(not doc.lines[i].ja for i in doc.chunks[c].line_ids)]
-            if not todo_chunks:
-                break
-            first = next(i for i in doc.chunks[todo_chunks[0]].line_ids if not doc.lines[i].ja)
-            batch = []
-            i = first
-            while i < len(doc.lines) and len(batch) < tcfg.batch_lines and not doc.lines[i].ja:
-                batch.append(doc.lines[i])
-                i += 1
+        in_flight: set[int] = set()   # line ids being translated right now
+
+        def next_batch() -> list | None:
+            """Contiguous untranslated lines, starting in the most urgent chunk that still has any."""
+            for c in self.sched.order(vid, len(doc.chunks)):
+                first = next((i for i in doc.chunks[c].line_ids
+                              if not doc.lines[i].ja and i not in in_flight), None)
+                if first is None:
+                    continue
+                batch, i = [], first
+                while (i < len(doc.lines) and len(batch) < tcfg.batch_lines
+                       and not doc.lines[i].ja and i not in in_flight):
+                    batch.append(doc.lines[i])
+                    i += 1
+                return batch
+            return None
+
+        async def run_batch(batch) -> None:
+            first = batch[0].id
             context = doc.lines[max(0, first - tcfg.context_lines): first]
-            result = await translator.translate(batch, context)
-            for l in batch:
-                l.ja = result[l.id]
+            try:
+                result = await translator.translate(batch, context)
+                for l in batch:
+                    l.ja = result[l.id]
+            finally:
+                in_flight.difference_update(l.id for l in batch)
             await asyncio.to_thread(self._save_translation, paths, doc)
             self.db.update_job(vid, translated=sum(1 for l in doc.lines if l.ja))
             self._notify(vid)
+
+        # several batches in flight: free-tier models can take a minute per batch
+        running: set[asyncio.Task] = set()
+        try:
+            while True:
+                while len(running) < max(1, int(getattr(tcfg, "concurrency", 1))):
+                    batch = next_batch()
+                    if not batch:
+                        break
+                    in_flight.update(l.id for l in batch)
+                    running.add(asyncio.create_task(run_batch(batch)))
+                if not running:
+                    break
+                done, running = await asyncio.wait(running, return_when=asyncio.FIRST_COMPLETED)
+                for t in done:
+                    t.result()
+        finally:
+            for t in running:
+                t.cancel()
         self._subs_ready(vid)
 
     def _save_translation(self, paths: VideoPaths, doc: LinesDoc) -> None:

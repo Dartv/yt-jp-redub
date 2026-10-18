@@ -29,6 +29,7 @@ chunk_sec = 60            # target dub chunk length, split at silences
 [translate]
 backend = "openai"        # "openai" (any OpenAI-compatible API) or "mock"
 batch_lines = 40
+concurrency = 3           # batches translated in parallel (within the rpm limit)
 context_lines = 8
 rpm = 25                  # requests per minute limit
 tpm = 14000               # tokens per minute limit (rough estimate on our side)

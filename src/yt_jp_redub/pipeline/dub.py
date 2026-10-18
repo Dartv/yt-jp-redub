@@ -123,7 +123,9 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     for k, l in enumerate(lines):
         nxt_start = lines[k + 1].start - chunk.start if k + 1 < len(lines) else chunk.duration
         slot_start = l.start - chunk.start
-        avail = max(0.3, nxt_start - slot_start - GAP)
+        # pace from where this line will really start: after a spill, later lines speed up to catch up
+        start = max(slot_start, cursor + (GAP if cursor else 0.0))
+        avail = max(0.3, nxt_start - start - GAP)
         factor = float(np.clip(avail / pace.predict(l.ja), min_factor, 1.0))
         out = tts_dir / f"{l.id:05d}.wav"
         if not out.exists():
@@ -138,12 +140,17 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
         target_db = float(np.clip(orig_db, -30, -10)) if orig_db > -50 else -20.0
         wav = wav * (10 ** ((target_db - ff.rms_db(wav)) / 20))
 
-        start = max(slot_start, cursor + (GAP if cursor else 0.0))
         room = chunk.duration - start
         dur = len(wav) / sr
-        if dur > room and room > 0.3:  # would run past the chunk: squeeze, then cut with a fade
-            wav = _time_stretch(wav, sr, min(1.35, dur / room), cdir)
-        a = int(start * sr)
+        if dur > room:  # would run past the chunk: squeeze, then cut with a fade
+            squeeze = min(1.35, dur / max(room, 0.1))
+            wav = _time_stretch(wav, sr, squeeze, cdir)
+            if len(wav) / sr > room:
+                # last resort: start earlier (overlapping the previous line's tail) rather than drop it
+                start = max(slot_start - 0.5, chunk.duration - len(wav) / sr, 0.0)
+                start = min(start, max(0.0, chunk.duration - 0.3))
+                log.warning("line %d does not fit its chunk; overlapping by %.2fs", l.id, max(0, cursor - start))
+        a = min(int(start * sr), max(0, n - 1))
         b = min(n, a + len(wav))
         seg = wav[: b - a].copy()
         if len(seg) < len(wav):

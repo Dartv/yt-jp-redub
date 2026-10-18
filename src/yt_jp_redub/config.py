@@ -20,7 +20,7 @@ DEFAULTS: dict = {
     "segment": {"max_line_chars": 120, "max_line_sec": 9.0, "pause_split_sec": 0.5, "chunk_sec": 60},
     "translate": {
         "backend": "openai", "batch_lines": 40, "context_lines": 8, "rpm": 25, "tpm": 14000,
-        "max_retries": 8, "temperature": 0.4,
+        "max_retries": 8, "temperature": 0.4, "concurrency": 3,
     },
     "separate": {"backend": "demucs", "model": "htdemucs", "device": "cuda"},
     "tts": {

@@ -74,6 +74,11 @@ class OpenAITranslator:
     def __init__(self, base_url: str, api_key: str, model: str, cfg, system_prompt: bool = False):
         if not api_key:
             raise RuntimeError("LLM_API_KEY is not set (see .env.example), or set translate.backend = \"mock\".")
+        if ":generateContent" in base_url or base_url.rstrip("/").endswith("/chat/completions"):
+            raise RuntimeError(
+                "LLM_BASE_URL must be the OpenAI-compatible API root, not a full endpoint URL. "
+                "For Google AI Studio use LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ "
+                "and put the model name in LLM_MODEL.")
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.key, self.model, self.cfg, self.system_prompt = api_key, model, cfg, system_prompt
         self.limiter = RateLimiter(cfg.rpm, cfg.tpm)
