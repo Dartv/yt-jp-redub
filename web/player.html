@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>yt-jp-redub player</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>">
+<script src="/static/vendor/hls.min.js"></script>
+</head>
+<body class="player">
+<div class="wrap">
+  <header class="top" style="margin:8px 0"><a href="/">← Library</a></header>
+  <div class="stage" id="stage">
+    <video id="video" controls playsinline preload="auto" crossorigin="anonymous"></video>
+    <div class="overlay" id="overlay">
+      <div class="spinner" id="spin"></div>
+      <div class="big" id="ovTitle">Preparing…</div>
+      <div id="ovText" class="small"></div>
+      <button class="play" id="ovPlay" hidden>▶ Play</button>
+    </div>
+    <div class="subs" id="subs" title="Tap to pause">
+      <div class="ja" id="subJa" lang="ja"></div>
+      <div class="en" id="subEn" lang="en"></div>
+    </div>
+  </div>
+  <div class="timeline" id="timeline" title="Dubbed parts"></div>
+  <div class="controls">
+    <div class="group"><span class="label">Audio</span>
+      <button id="audJa" class="on">日本語</button><button id="audEn">English</button></div>
+    <div class="group"><span class="label">Subs</span>
+      <button id="subBtnJa" class="on">JA</button><button id="subBtnEn">EN</button></div>
+    <span class="spacer"></span>
+    <button id="asbBtn" title="Send subtitles to asbplayer's WebSocket client" hidden>asbplayer</button>
+    <button id="fsBtn" title="Fullscreen with subtitles">⛶</button>
+  </div>
+  <h2 class="vtitle" id="title"></h2>
+  <div class="status" id="status"></div>
+</div>
+
+<script>
+"use strict";
+const vid = location.pathname.split("/").pop();
+const params = new URLSearchParams(location.search);
+const $ = id => document.getElementById(id);
+const video = $("video");
+const media = `/media/${vid}`;
+
+let status = null, info = { head_start_sec: 120 }, lines = [], hls = null;
+let started = false, waitingDub = false, userPaused = false, lang = "ja";
+let variantMode = params.get("mode") === "variants";
+let showJa = true, showEn = false, tracksAdded = false;
+let rate = { t: Date.now(), done: 0, secPerChunk: null };
+const startAt = parseFloat(params.get("t") || "0") || 0;
+
+// ------------------------------------------------------------------ helpers
+function fmt(s) { s = Math.max(0, Math.round(s)); const m = Math.floor(s / 60), x = s % 60; return m + ":" + String(x).padStart(2, "0"); }
+function overlay(title, text, { spin = true, play = false } = {}) {
+  $("overlay").hidden = false; $("ovTitle").textContent = title; $("ovText").textContent = text || "";
+  $("spin").hidden = !spin; $("ovPlay").hidden = !play;
+}
+function hideOverlay() { $("overlay").hidden = true; }
+
+function chunkIndexAt(t) {
+  const c = status.chunks; for (let i = 0; i < c.length; i++) if (t >= c[i][0] && t < c[i][1]) return i;
+  return c.length - 1;
+}
+/** End of the contiguous dubbed region that contains (or starts at) t. */
+function dubbedUntil(t) {
+  if (!status || !status.chunks.length) return 0;
+  const c = status.chunks; let i = chunkIndexAt(t);
+  if (!c[i][2]) return t >= c[i][0] ? c[i][0] : 0;
+  while (i < c.length && c[i][2]) i++;
+  return i >= c.length ? status.duration : c[i][0];
+}
+function needAhead(t) { return Math.min(info.head_start_sec, Math.max(0, (status.duration || 0) - t - 0.5)); }
+function etaText(t) {
+  const c = status.chunks; let missing = 0;
+  for (let i = chunkIndexAt(t); i < c.length && c[i][0] < t + needAhead(t) && missing < 50; i++) if (!c[i][2]) missing++;
+  if (!rate.secPerChunk || !missing) return "";
+  return `ready in ~${Math.ceil(missing * rate.secPerChunk)} s`;
+}
+
+// ------------------------------------------------------------------ status polling
+async function poll() {
+  try {
+    const r = await fetch(`/api/jobs/${vid}`, { cache: "no-store" });
+    if (r.ok) onStatus(await r.json());
+  } catch (e) {}
+  setTimeout(poll, status && status.stage === "done" ? 10000 : 2000);
+}
+
+function onStatus(s) {
+  const prevDone = status ? status.chunks_done : 0;
+  status = s;
+  document.title = (s.title || vid) + " – yt-jp-redub";
+  $("title").textContent = s.title || "";
+  if (s.chunks_done > prevDone) {
+    const now = Date.now();
+    if (rate.done) rate.secPerChunk = (now - rate.t) / 1000 / Math.max(1, s.chunks_done - rate.done);
+    rate = { t: now, done: s.chunks_done, secPerChunk: rate.secPerChunk };
+  }
+  renderTimeline();
+  renderStatus();
+  if (!s.subs_complete || !lines.length) loadLines();
+  if (s.subs_complete) addTracks();
+  if (s.stage === "error") { overlay("Processing failed", s.error || "", { spin: false }); return; }
+  if (!hls && !video.src && s.ready) startPlayer();
+  if (!started) maybeStart(); else checkCatchUp();
+}
+
+function renderStatus() {
+  const s = status, parts = [];
+  const names = { queued: "Queued", downloading: "Downloading", transcribing: "Transcribing", translating: "Translating",
+    dubbing: "Dubbing", done: "Dub complete", error: "Failed" };
+  let st = names[s.stage] || s.stage;
+  if (s.stage === "queued" && s.position) st += ` (#${s.position + 1} in line)`;
+  parts.push(st);
+  if (s.total_lines && s.translated < s.total_lines) parts.push(`subtitles ${s.translated}/${s.total_lines}`);
+  if (s.chunks_total && s.stage !== "done") parts.push(`dubbed ${s.chunks_done}/${s.chunks_total} parts`);
+  $("status").textContent = parts.join(" · ");
+}
+
+function renderTimeline() {
+  if (!status.duration) return;
+  const d = status.duration;
+  $("timeline").innerHTML = status.chunks.filter(c => c[2]).map(c =>
+    `<i style="left:${c[0] / d * 100}%;width:${(c[1] - c[0]) / d * 100}%"></i>`).join("") +
+    `<b style="left:${(video.currentTime || 0) / d * 100}%"></b>`;
+}
+
+async function loadLines() {
+  try {
+    const r = await fetch(`/api/jobs/${vid}/lines`, { cache: "no-store" });
+    lines = (await r.json()).lines;
+  } catch (e) {}
+}
+
+// ------------------------------------------------------------------ playback
+function startPlayer() {
+  const src = variantMode ? `${media}/master.m3u8?audio=${lang}` : `${media}/master.m3u8`;
+  if (window.Hls && Hls.isSupported()) {
+    const retry = { maxNumRetry: 1000, retryDelayMs: 1000, maxRetryDelayMs: 4000 };
+    hls = new Hls({
+      maxBufferLength: 60, maxMaxBufferLength: 120, startPosition: startAt,
+      fragLoadPolicy: { default: { maxTimeToFirstByteMs: 30000, maxLoadTimeMs: 60000,
+        timeoutRetry: retry, errorRetry: retry } },
+    });
+    hls.on(Hls.Events.MANIFEST_PARSED, () => maybeStart());
+    hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => setAudio(lang, true));
+    hls.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal) return;
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hls.startLoad(), 2000);
+      else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+      else console.error(d);
+    });
+    hls.loadSource(src);
+    hls.attachMedia(video);
+  } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
+    variantMode = true;
+    video.src = src + (startAt ? "" : "");
+    video.addEventListener("loadedmetadata", () => { if (startAt) video.currentTime = startAt; maybeStart(); }, { once: true });
+  } else {
+    overlay("This browser can't play HLS", "", { spin: false });
+  }
+}
+
+function maybeStart() {
+  if (started || !status) return;
+  if (status.stage === "error") return;
+  if (!hls && !video.src) {
+    const pre = { queued: "Queued", downloading: "Downloading", transcribing: "Transcribing" }[status.stage];
+    overlay(pre ? pre + "…" : "Preparing…", status.stage_progress != null ? Math.round(status.stage_progress * 100) + "%" : "");
+    return;
+  }
+  const t = startAt, until = dubbedUntil(t);
+  if (lang === "ja" && until - t < needAhead(t)) {
+    const have = Math.max(0, until - t), need = needAhead(t);
+    overlay("Dubbing the first part…", `${Math.round(have)} / ${Math.round(need)} s ready ${etaText(t) ? "· " + etaText(t) : ""}`);
+    return;
+  }
+  started = true;
+  overlay("Ready", "", { spin: false, play: true });
+  video.play().then(hideOverlay).catch(() => {});  // autoplay may need a tap
+}
+
+function checkCatchUp() {
+  if (!status || lang !== "ja" || !started) return;
+  const t = video.currentTime, until = dubbedUntil(t);
+  const remaining = (status.duration || 0) - t;
+  if (!waitingDub && !video.paused && until < status.duration && until - t < 1.5) {
+    waitingDub = true;
+    video.pause();
+  }
+  if (waitingDub) {
+    const enough = until - t >= Math.min(30, remaining - 0.5) || until >= status.duration;
+    if (enough) {
+      waitingDub = false; hideOverlay();
+      if (!userPaused) video.play().catch(() => overlay("Ready", "", { spin: false, play: true }));
+    } else {
+      overlay("Dubbing…", etaText(t) || "almost there");
+    }
+  }
+}
+
+$("ovPlay").onclick = () => { userPaused = false; video.play().then(hideOverlay); };
+video.addEventListener("play", () => { userPaused = false; if (!waitingDub) hideOverlay(); });
+video.addEventListener("pause", () => { if (!waitingDub) userPaused = true; });
+video.addEventListener("timeupdate", () => { renderSubs(); checkCatchUp(); renderTimeline(); });
+video.addEventListener("seeking", () => { reportPlayhead(); renderSubs(); if (waitingDub) checkCatchUp(); });
+video.addEventListener("seeked", () => { if (started) { const t = video.currentTime;
+  if (lang === "ja" && dubbedUntil(t) - t < 1.5 && dubbedUntil(t) < status.duration) {
+    waitingDub = true; video.pause(); checkCatchUp(); } } });
+
+// ------------------------------------------------------------------ audio switch
+function setAudio(l, initial = false) {
+  lang = l;
+  $("audJa").classList.toggle("on", l === "ja"); $("audEn").classList.toggle("on", l === "en");
+  if (l === "en" && waitingDub) { waitingDub = false; hideOverlay(); if (!userPaused) video.play().catch(() => {}); }
+  if (!hls) return;
+  if (!variantMode) {
+    const idx = hls.audioTracks.findIndex(t => t.lang === l);
+    if (idx >= 0 && hls.audioTrack !== idx) hls.audioTrack = idx;
+  } else if (!initial) {
+    // fallback: separate variant streams; reload at the current time
+    const t = video.currentTime, playing = !video.paused;
+    hls.loadSource(`${media}/master.m3u8?audio=${l}`);
+    hls.once(Hls.Events.MANIFEST_PARSED, () => { video.currentTime = t; if (playing) video.play().catch(() => {}); });
+  }
+  if (l === "ja") checkCatchUp();
+}
+$("audJa").onclick = () => setAudio("ja");
+$("audEn").onclick = () => setAudio("en");
+
+// ------------------------------------------------------------------ built-in subtitles
+function lineAt(t) {
+  let lo = 0, hi = lines.length - 1, best = -1;
+  while (lo <= hi) { const m = (lo + hi) >> 1; if (lines[m].start <= t) { best = m; lo = m + 1; } else hi = m - 1; }
+  if (best < 0) return null;
+  const l = lines[best], next = lines[best + 1];
+  const end = Math.max(l.end + 0.6, l.start + 1.2);
+  return t <= (next ? Math.min(end, next.start) : end) ? l : null;
+}
+let shownId = null;
+function renderSubs() {
+  const l = lineAt(video.currentTime);
+  const id = l ? l.id + (l.ja ? "j" : "") : null;
+  if (id === shownId) return;
+  shownId = id;
+  $("subJa").textContent = l && showJa ? (l.ja || "") : "";
+  $("subEn").textContent = l && showEn ? l.en : "";
+  $("subJa").hidden = !showJa; $("subEn").hidden = !showEn;
+}
+function toggleSub(which) {
+  if (which === "ja") showJa = !showJa; else showEn = !showEn;
+  $("subBtnJa").classList.toggle("on", showJa); $("subBtnEn").classList.toggle("on", showEn);
+  shownId = undefined; renderSubs();
+}
+$("subBtnJa").onclick = () => toggleSub("ja");
+$("subBtnEn").onclick = () => toggleSub("en");
+// tapping the subtitle area pauses; it stays paused until play is pressed
+$("subs").addEventListener("click", () => { if (!video.paused) { userPaused = true; video.pause(); } });
+
+$("fsBtn").onclick = () => {
+  const st = $("stage");
+  if (document.fullscreenElement) document.exitFullscreen();
+  else (st.requestFullscreen || st.webkitRequestFullscreen).call(st);
+};
+
+// ------------------------------------------------------------------ playhead reports (priority hints)
+let lastReport = 0;
+function reportPlayhead() {
+  if (!status) return;
+  lastReport = Date.now();
+  fetch(`/api/jobs/${vid}/playhead`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ t: video.currentTime || startAt, asbplayer: true }) }).catch(() => {});
+}
+setInterval(() => { if (Date.now() - lastReport > 5000) reportPlayhead(); }, 1000);
+
+// ------------------------------------------------------------------ asbplayer
+// PC: the server pushes subtitles over asbplayer's WebSocket client; this button re-sends them.
+$("asbBtn").hidden = /Android|iPhone|iPad/i.test(navigator.userAgent);
+$("asbBtn").onclick = async () => {
+  const r = await fetch(`/api/jobs/${vid}/asbplayer`, { method: "POST" });
+  const { clients } = await r.json();
+  $("asbBtn").textContent = clients ? "asbplayer ✓" : "asbplayer (not connected)";
+};
+// Android: asbplayer discovers <track> elements and asks the page via its event protocol.
+function trackList() {
+  const t = status && status.title || vid;
+  return ["ja", "en"].map(l => ({ id: `${vid}-${l}`, label: l === "ja" ? "日本語" : "English", language: l,
+    url: new URL(`${media}/subs/${l}.vtt`, location.href).href, extension: "vtt" }));
+}
+function addTracks() {
+  if (tracksAdded) return;
+  tracksAdded = true;
+  for (const t of trackList()) {
+    const el = document.createElement("track");
+    Object.assign(el, { kind: "subtitles", label: t.label, srclang: t.language, src: t.url });
+    video.appendChild(el);
+    el.track.mode = "disabled";  // rendered by the page itself, not the browser
+  }
+}
+function onSyncRequest() {
+  const detail = status && status.subs_complete
+    ? { error: "", basename: status.title || vid, subtitles: trackList() }
+    : { error: "Subtitles are still being translated; try again in a moment.", basename: status ? status.title || vid : vid, subtitles: [] };
+  const ev = () => new CustomEvent("asbplayer-synced-data", { detail });
+  video.dispatchEvent(ev());
+  document.dispatchEvent(ev());
+}
+video.addEventListener("asbplayer-get-synced-data", e => { e.stopPropagation(); onSyncRequest(); });
+document.addEventListener("asbplayer-get-synced-data", e => { if (e.target === document) onSyncRequest(); });
+
+fetch("/api/info").then(r => r.json()).then(i => { info = i; }).finally(poll);
+</script>
+</body>
+</html>

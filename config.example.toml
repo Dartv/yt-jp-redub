@@ -1,0 +1,56 @@
+# yt-jp-redub settings. Copy to config.toml and edit; every key is optional.
+# Secrets (bot token, LLM key) go in .env, not here.
+
+[server]
+host = "0.0.0.0"          # "127.0.0.1" limits access to this PC only
+port = 8765
+ws_port = 8766            # asbplayer WebSocket client connects here (PC only)
+public_host = ""          # override the auto-discovered LAN IP used in links
+
+[storage]
+data_dir = "data"
+cap_gb = 50               # least recently watched videos are deleted when over the cap
+
+[download]
+max_height = 1080
+cookies_file = ""         # optional Netscape cookies.txt for yt-dlp
+
+[asr]
+model = "nemo-parakeet-tdt-0.6b-v2"
+device = "cuda"           # "cuda" or "cpu"
+use_vocals = false        # run ASR on Demucs vocals (better for music-heavy videos, slower start)
+
+[segment]
+max_line_chars = 120      # English characters per subtitle line
+max_line_sec = 9.0
+pause_split_sec = 0.5     # a pause this long ends a line
+chunk_sec = 60            # target dub chunk length, split at silences
+
+[translate]
+backend = "openai"        # "openai" (any OpenAI-compatible API) or "mock"
+batch_lines = 40
+context_lines = 8
+rpm = 25                  # requests per minute limit
+tpm = 14000               # tokens per minute limit (rough estimate on our side)
+max_retries = 8
+temperature = 0.4
+
+[separate]
+backend = "demucs"        # "demucs" or "mock"
+model = "htdemucs"
+device = "cuda"
+
+[tts]
+backend = "indextts"      # "indextts" or "mock"
+indextts_dir = "third_party/index-tts"
+lang = "JA"
+max_speedup = 1.5         # lines are spoken up to this much faster to fit the original slot
+min_ref_sec = 3.0         # shorter reference audio is padded with neighbouring audio
+use_bf16 = true
+emo_alpha = 1.0
+
+[stream]
+head_start_sec = 120      # playback starts once this much past the start point is dubbed
+lookahead_chunks = 3      # chunks after the playhead that always go first
+hold_sec = 20             # how long a not-yet-dubbed segment request is held before 503
+video_segment_sec = 6

@@ -1,0 +1,11 @@
+data/
+.env
+config.toml
+.venv/
+__pycache__/
+*.pyc
+third_party/
+*.log
+models/
+data_mock/
+config.mock.toml
