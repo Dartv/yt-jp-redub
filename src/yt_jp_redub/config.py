@@ -19,14 +19,29 @@ DEFAULTS: dict = {
     "asr": {"model": "nemo-parakeet-tdt-0.6b-v2", "device": "cuda", "use_vocals": False},
     "segment": {"max_line_chars": 120, "max_line_sec": 9.0, "pause_split_sec": 0.5, "chunk_sec": 60},
     "translate": {
-        "backend": "openai", "batch_lines": 40, "context_lines": 8, "rpm": 25, "tpm": 14000,
-        "max_retries": 20, "temperature": 0.4, "concurrency": 3,
+        "backend": "openai",
+        "batch_lines": 40,
+        "context_lines": 8,
+        "rpm": 25,
+        "tpm": 14000,
+        "max_retries": 20,
+        "temperature": 0.4,
+        "concurrency": 3,
     },
     "separate": {"backend": "demucs", "model": "htdemucs", "device": "cuda"},
     "tts": {
-        "backend": "indextts", "indextts_dir": "third_party/index-tts", "lang": "JA",
-        "max_speedup": 1.25, "max_slowdown": 1.2, "group_speakers": True, "speaker_sim": 0.55,
-        "group_gap_sec": 0.4, "group_max_sec": 12.0, "min_ref_sec": 3.0, "use_bf16": True, "emo_alpha": 1.0,
+        "backend": "indextts",
+        "indextts_dir": "third_party/index-tts",
+        "lang": "JA",
+        "max_speedup": 1.25,
+        "max_slowdown": 1.2,
+        "group_speakers": True,
+        "speaker_sim": 0.55,
+        "group_gap_sec": 0.4,
+        "group_max_sec": 12.0,
+        "min_ref_sec": 3.0,
+        "use_bf16": True,
+        "emo_alpha": 1.0,
     },
     "stream": {"head_start_sec": 120, "lookahead_chunks": 3, "hold_sec": 20, "video_segment_sec": 6},
 }
@@ -53,8 +68,6 @@ class Secrets:
     llm_api_key: str = ""
     llm_model: str = "gemma-4-31b-it"
     llm_system_prompt: bool = False
-    telegram_bot_token: str = ""
-    telegram_allowed_user_id: int | None = None
 
 
 @dataclass
@@ -99,13 +112,10 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
     if overrides:
         data = _merge(data, overrides)
     env = os.environ
-    uid = env.get("TELEGRAM_ALLOWED_USER_ID", "").strip()
     secrets = Secrets(
         llm_base_url=env.get("LLM_BASE_URL") or Secrets.llm_base_url,
         llm_api_key=env.get("LLM_API_KEY", ""),
         llm_model=env.get("LLM_MODEL") or Secrets.llm_model,
         llm_system_prompt=_bool(env.get("LLM_SYSTEM_PROMPT")),
-        telegram_bot_token=env.get("TELEGRAM_BOT_TOKEN", "").strip(),
-        telegram_allowed_user_id=int(uid) if uid.lstrip("-").isdigit() else None,
     )
     return Config(**{k: _ns(v) for k, v in data.items()}, secrets=secrets)

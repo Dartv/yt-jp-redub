@@ -8,7 +8,7 @@ from ..models import LinesDoc
 
 
 def _ts(t: float, sep: str = ".") -> str:
-    ms = int(round(max(0.0, t) * 1000))
+    ms = round(max(0.0, t) * 1000)
     h, ms = divmod(ms, 3_600_000)
     m, ms = divmod(ms, 60_000)
     s, ms = divmod(ms, 1000)

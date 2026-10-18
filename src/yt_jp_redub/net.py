@@ -13,15 +13,19 @@ import subprocess
 import sys
 import time
 
-EXCLUDE = re.compile(r"warp|cloudflare|tailscale|zerotier|wireguard|wg\d|tun|tap|utun|vethernet|hyper-v|"
-                     r"virtualbox|vbox|vmware|vmnet|docker|br-|veth|wsl|loopback|npcap|hamachi|nordlynx|"
-                     r"openvpn|proton|mullvad|bluetooth", re.I)
+EXCLUDE = re.compile(
+    r"warp|cloudflare|tailscale|zerotier|wireguard|wg\d|tun|tap|utun|vethernet|hyper-v|"
+    r"virtualbox|vbox|vmware|vmnet|docker|br-|veth|wsl|loopback|npcap|hamachi|nordlynx|"
+    r"openvpn|proton|mullvad|bluetooth",
+    re.I,
+)
 
 
 def _run(cmd: list[str]) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=5,
-                              encoding="utf-8", errors="replace").stdout
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace"
+        ).stdout
     except Exception:
         return ""
 
@@ -32,15 +36,23 @@ def _private(ip: str) -> bool:
     except ValueError:
         return False
     # 100.64/10 is CGNAT (Tailscale); 172.16.0.2 style WARP addresses are caught by the name filter
-    return a.version == 4 and a.is_private and not a.is_loopback and not a.is_link_local \
+    return (
+        a.version == 4
+        and a.is_private
+        and not a.is_loopback
+        and not a.is_link_local
         and a not in ipaddress.ip_network("100.64.0.0/10")
+    )
 
 
 def _windows() -> list[tuple[str, str, bool]]:
     """(name, ip, has_gateway) from PowerShell's Get-NetIPConfiguration."""
-    ps = ("[Console]::OutputEncoding=[Text.Encoding]::UTF8; Get-NetIPConfiguration | ForEach-Object { $_.InterfaceAlias + '|' + $_.InterfaceDescription + '|' + "
-          "(($_.IPv4Address | ForEach-Object { $_.IPAddress }) -join ',') + '|' + "
-          "[string]($_.IPv4DefaultGateway.NextHop) }")
+    ps = (
+        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+        "Get-NetIPConfiguration | ForEach-Object { $_.InterfaceAlias + '|' + $_.InterfaceDescription + '|' + "
+        "(($_.IPv4Address | ForEach-Object { $_.IPAddress }) -join ',') + '|' + "
+        "[string]($_.IPv4DefaultGateway.NextHop) }"
+    )
     out = []
     for line in _run(["powershell", "-NoProfile", "-Command", ps]).splitlines():
         parts = line.strip().split("|")
@@ -114,5 +126,6 @@ def _discover() -> str:
 
 def public_base(cfg) -> str:
     host = cfg.server.public_host or (
-        "127.0.0.1" if cfg.server.host in ("127.0.0.1", "localhost") else lan_ip())
+        "127.0.0.1" if cfg.server.host in ("127.0.0.1", "localhost") else lan_ip()
+    )
     return f"http://{host}:{cfg.server.port}"

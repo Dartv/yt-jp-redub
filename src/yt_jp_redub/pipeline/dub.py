@@ -21,8 +21,8 @@ from .pace import PaceModel
 
 log = logging.getLogger(__name__)
 
-GAP = 0.06            # minimum silence between consecutive utterances
-CTX = 1.0             # extra audio given to Demucs on both sides of a chunk
+GAP = 0.06  # minimum silence between consecutive utterances
+CTX = 1.0  # extra audio given to Demucs on both sides of a chunk
 
 
 @dataclass
@@ -52,12 +52,13 @@ def group_utterances(lines: list[Line], vocals16k: np.ndarray, offset: float, cf
     if not cfg.group_speakers or len(lines) < 2:
         return utts
     from . import speaker
+
     if not speaker.available():
         return utts
 
     def emb(l: Line):
         a, b = int((l.start - offset) * 16000), int((l.end - offset) * 16000)
-        return speaker.embed(vocals16k[max(0, a): max(0, b)])
+        return speaker.embed(vocals16k[max(0, a) : max(0, b)])
 
     embs = {l.id: emb(l) for l in lines}
     out = [utts[0]]
@@ -105,7 +106,7 @@ def _trim_silence(wav: np.ndarray, sr: int, thresh_db: float = -50.0) -> np.ndar
     loud = np.where(mono > 10 ** (thresh_db / 20))[0]
     if len(loud) == 0:
         return wav
-    return wav[max(0, loud[0] - int(0.03 * sr)): loud[-1] + int(0.08 * sr)]
+    return wav[max(0, loud[0] - int(0.03 * sr)) : loud[-1] + int(0.08 * sr)]
 
 
 def _fade(wav: np.ndarray, sr: int, fade_in: float = 0.012, fade_out: float = 0.05) -> np.ndarray:
@@ -118,7 +119,9 @@ def _fade(wav: np.ndarray, sr: int, fade_in: float = 0.012, fade_out: float = 0.
     return wav
 
 
-def _reference(vocals: np.ndarray, sr: int, start: float, end: float, min_sec: float, max_sec: float = 12.0) -> np.ndarray:
+def _reference(
+    vocals: np.ndarray, sr: int, start: float, end: float, min_sec: float, max_sec: float = 12.0
+) -> np.ndarray:
     """The original vocals of [start, end] (chunk-relative), padded to min_sec with neighbouring audio."""
     s, e = start, end + 0.1
     total = len(vocals) / sr
@@ -130,7 +133,7 @@ def _reference(vocals: np.ndarray, sr: int, start: float, end: float, min_sec: f
         if e > total:
             s, e = max(0.0, s - (e - total)), total
     e = min(e, s + max_sec)
-    return vocals[int(max(0, s) * sr): int(min(total, e) * sr)]
+    return vocals[int(max(0, s) * sr) : int(min(total, e) * sr)]
 
 
 def _time_stretch(wav: np.ndarray, sr: int, factor: float, tmp_dir: Path) -> np.ndarray:
@@ -155,7 +158,7 @@ def _separate(paths: VideoPaths, chunk: Chunk, separator, sr: int, n: int) -> tu
         wide, _ = ff.read_slice(paths.audio_wav, chunk.start - pre, chunk.end + CTX)
         v, b = separator.separate(wide, sr)
         off = int(pre * sr)
-        vocals, background = v[off:off + n], b[off:off + n]
+        vocals, background = v[off : off + n], b[off : off + n]
         ff.write_wav(vpath, vocals, sr)
         ff.write_wav(bpath, background, sr)
     return _pad_to(vocals, n), _pad_to(background, n)
@@ -188,9 +191,13 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
         # after a spill this starts late, and pacing below makes it catch up
         start = max(rel, cursor + (GAP if cursor else 0.0))
         speech_end = _speech_end(env_db, ENV_HOP, rel, u.end - chunk.start, next_start - GAP)
-        target = max(0.3, min(speech_end, next_start - GAP) - start)   # the time the original took
-        wav, tsr = _fit(tts, u, refs[u.id], cdir / "tts" / f"{u.id:05d}-{len(u.lines)}.wav", target, pace, cfg.tts)
-        wav = _match_loudness(ff.resample(wav, tsr, sr), vocals[int(rel * sr): int((u.end - chunk.start) * sr)])
+        target = max(0.3, min(speech_end, next_start - GAP) - start)  # the time the original took
+        wav, tsr = _fit(
+            tts, u, refs[u.id], cdir / "tts" / f"{u.id:05d}-{len(u.lines)}.wav", target, pace, cfg.tts
+        )
+        wav = _match_loudness(
+            ff.resample(wav, tsr, sr), vocals[int(rel * sr) : int((u.end - chunk.start) * sr)]
+        )
         cursor = _place(voice, wav, sr, start, rel, chunk.duration, cdir, u.id)
 
     mix = background + np.repeat(voice, 2, axis=1)
@@ -202,8 +209,9 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     return out_path
 
 
-def _write_references(utts: list[Utterance], vocals: np.ndarray, sr: int, chunk: Chunk, refs_dir: Path,
-                      min_sec: float) -> dict[int, Path]:
+def _write_references(
+    utts: list[Utterance], vocals: np.ndarray, sr: int, chunk: Chunk, refs_dir: Path, min_sec: float
+) -> dict[int, Path]:
     """Each utterance's own original vocals; quiet or very short ones borrow the nearest usable one."""
     refs_dir.mkdir(exist_ok=True)
     clips = {u.id: _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, min_sec) for u in utts}
@@ -218,7 +226,9 @@ def _write_references(utts: list[Utterance], vocals: np.ndarray, sr: int, chunk:
     return out
 
 
-def _fit(tts, u: Utterance, ref: Path, out: Path, target: float, pace: PaceModel, cfg) -> tuple[np.ndarray, int]:
+def _fit(
+    tts, u: Utterance, ref: Path, out: Path, target: float, pace: PaceModel, cfg
+) -> tuple[np.ndarray, int]:
     """Synthesizes the utterance paced to last about `target` seconds (within the speed limits).
     A badly missed prediction gets one corrective take: too short sounds like stopping early,
     too long pushes later lines back."""
@@ -230,7 +240,9 @@ def _fit(tts, u: Utterance, ref: Path, out: Path, target: float, pace: PaceModel
     better = float(np.clip(target / natural, lo, hi))
     if abs(len(wav) / tsr - target) > max(0.4, 0.2 * target) and abs(better - factor) > 0.05:
         wav, tsr, factor = _synth(tts, u, ref, out, better, force=True)
-    log.debug("utt %d lines=%d target=%.2f factor=%.2f got=%.2f", u.id, len(u.lines), target, factor, len(wav) / tsr)
+    log.debug(
+        "utt %d lines=%d target=%.2f factor=%.2f got=%.2f", u.id, len(u.lines), target, factor, len(wav) / tsr
+    )
     return wav, tsr
 
 
@@ -241,8 +253,16 @@ def _match_loudness(wav: np.ndarray, original: np.ndarray) -> np.ndarray:
     return wav * (10 ** ((target_db - ff.rms_db(wav)) / 20))
 
 
-def _place(voice: np.ndarray, wav: np.ndarray, sr: int, start: float, rel: float, chunk_len: float,
-           tmp_dir: Path, uid: int) -> float:
+def _place(
+    voice: np.ndarray,
+    wav: np.ndarray,
+    sr: int,
+    start: float,
+    rel: float,
+    chunk_len: float,
+    tmp_dir: Path,
+    uid: int,
+) -> float:
     """Mixes `wav` into the voice track at `start`; returns where it ends. Speech that would run
     past the chunk is squeezed, then started earlier, and cut with a fade only as a last resort."""
     room = chunk_len - start
@@ -250,7 +270,9 @@ def _place(voice: np.ndarray, wav: np.ndarray, sr: int, start: float, rel: float
         wav = _time_stretch(wav, sr, min(1.35, (len(wav) / sr) / max(room, 0.1)), tmp_dir)
         if len(wav) / sr > room:
             new_start = min(max(rel - 0.5, chunk_len - len(wav) / sr, 0.0), max(0.0, chunk_len - 0.3))
-            log.warning("utterance %d does not fit its chunk; overlapping by %.2fs", uid, max(0.0, start - new_start))
+            log.warning(
+                "utterance %d does not fit its chunk; overlapping by %.2fs", uid, max(0.0, start - new_start)
+            )
             start = new_start
     wav = _fade(wav, sr)
     n = len(voice)

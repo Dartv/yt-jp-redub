@@ -14,6 +14,7 @@ class DemucsSeparator:
     def __init__(self, model: str = "htdemucs", device: str = "cuda"):
         import torch
         from demucs.pretrained import get_model
+
         if device == "cuda" and not torch.cuda.is_available():
             device = "mps" if torch.backends.mps.is_available() else "cpu"
         self.device = device
@@ -28,15 +29,23 @@ class DemucsSeparator:
         """audio: float32 (frames, channels) -> (vocals, background), same shape and rate."""
         import torch
         from demucs.apply import apply_model
+
         from .ff import resample
+
         x = audio if audio.shape[1] == 2 else np.repeat(audio[:, :1], 2, axis=1)
         x = resample(x, sr, self.sr)
         wav = torch.from_numpy(np.ascontiguousarray(x.T))
         ref = wav.mean(0)
         mean, std = ref.mean(), ref.std() + 1e-8
         with self._lock, torch.no_grad():
-            out = apply_model(self.model, ((wav - mean) / std)[None].to(self.device),
-                              shifts=0, split=True, overlap=0.25, progress=False)[0]
+            out = apply_model(
+                self.model,
+                ((wav - mean) / std)[None].to(self.device),
+                shifts=0,
+                split=True,
+                overlap=0.25,
+                progress=False,
+            )[0]
         out = (out * std + mean).cpu().numpy()  # (sources, channels, frames)
         vocals = out[self.vocals_idx].T
         background = out.sum(0).T - vocals

@@ -25,7 +25,7 @@ class AsbplayerBridge:
         self.worker = worker
         self.clients: set[web.WebSocketResponse] = set()
         self.watching_at: dict[str, float] = {}
-        self.sent: set[tuple[int, str]] = set()   # (client id, video_id)
+        self.sent: set[tuple[int, str]] = set()  # (client id, video_id)
 
     def app(self) -> web.Application:
         app = web.Application()
@@ -61,10 +61,12 @@ class AsbplayerBridge:
         self.watching_at[vid] = time.time()
         if first:
             import asyncio
+
             asyncio.get_running_loop().create_task(self._maybe_send(vid))
 
     def subs_ready(self, vid: str) -> None:
         import asyncio
+
         asyncio.get_running_loop().create_task(self._maybe_send(vid))
 
     async def _maybe_send(self, vid: str) -> None:
@@ -81,7 +83,9 @@ class AsbplayerBridge:
         for lang in ("ja", "en"):
             p = paths.subs / f"{lang}.srt"
             if p.exists():
-                files.append({"name": f"{safe}.{lang}.srt", "base64": base64.b64encode(p.read_bytes()).decode()})
+                files.append(
+                    {"name": f"{safe}.{lang}.srt", "base64": base64.b64encode(p.read_bytes()).decode()}
+                )
         if not files:
             return 0
         n = 0
@@ -90,8 +94,9 @@ class AsbplayerBridge:
             if key in self.sent and not force:
                 continue
             try:
-                await ws.send_json({"command": "load-subtitles", "messageId": str(uuid.uuid4()),
-                                    "body": {"files": files}})
+                await ws.send_json(
+                    {"command": "load-subtitles", "messageId": str(uuid.uuid4()), "body": {"files": files}}
+                )
                 self.sent.add(key)
                 n += 1
             except ConnectionError:

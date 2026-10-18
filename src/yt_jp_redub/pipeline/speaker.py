@@ -22,6 +22,7 @@ def _load():
         if _model is None:
             from huggingface_hub import hf_hub_download
             from onnx_asr.loader import Manager
+
             if not (MODEL_DIR / FILE).exists():
                 hf_hub_download(REPO, FILE, local_dir=MODEL_DIR)
             _model = Manager(providers=["CPUExecutionProvider"]).create_se(local_dir=MODEL_DIR, offline=True)

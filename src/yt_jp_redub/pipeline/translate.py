@@ -23,17 +23,24 @@ from .pace import char_budget
 log = logging.getLogger(__name__)
 
 INSTRUCTIONS = """You translate English video dialogue into natural spoken Japanese for a Japanese dub.
-The audience is Japanese learners who will listen to the dub, so the Japanese must sound like real people talking.
+The audience is Japanese learners who will listen to the dub, so the Japanese must sound like real people
+talking.
 
 Rules:
-- Match each speaker's register: casual stays casual (タメ口, contractions, fillers), polite stays polite, rude stays rude. Don't make everything です/ます.
+- Match each speaker's register: casual stays casual (タメ口, contractions, fillers), polite stays polite,
+  rude stays rude. Don't make everything です/ます.
 - Keep the emotion and personality: jokes, sarcasm, anger, excitement.
-- The dub has to fit the original timing. Each line comes with "max_chars": the most Japanese characters (kana/kanji, not counting punctuation) that can be spoken in the time the English line takes. Stay within it: paraphrase, drop filler words, use shorter natural phrasing. A short natural line beats a complete literal one.
-- Translate each line on its own (lines are spoken separately), but use the surrounding lines to keep pronouns, names and tone consistent.
+- The dub has to fit the original timing. Each line comes with "max_chars": the most Japanese characters
+  (kana/kanji, not counting punctuation) that can be spoken in the time the English line takes. Stay within
+  it: paraphrase, drop filler words, use shorter natural phrasing. A short natural line beats a complete
+  literal one.
+- Translate each line on its own (lines are spoken separately), but use the surrounding lines to keep
+  pronouns, names and tone consistent.
 - Keep names in katakana; well-known brand or game names may stay in Latin letters.
 - Fillers like "uh", "um" become natural Japanese fillers (えっと, あの) or are dropped.
 - Write numbers the way they'd be spoken naturally; avoid symbols the voice can't read.
-- Output ONLY a JSON object mapping every line id (as a string) to its Japanese translation. No comments, no markdown.
+- Output ONLY a JSON object mapping every line id (as a string) to its Japanese translation.
+  No comments, no markdown.
 """
 
 
@@ -59,7 +66,7 @@ class RateLimiter:
                 while self.events and now - self.events[0][0] > 60:
                     self.events.popleft()
                 used = sum(t for _, t in self.events)
-                if len(self.events) < self.rpm and used + tokens <= self.tpm or not self.events:
+                if (len(self.events) < self.rpm and used + tokens <= self.tpm) or not self.events:
                     self.events.append((now, tokens))
                     return
                 await asyncio.sleep(max(0.5, 60 - (now - self.events[0][0])))
@@ -77,18 +84,22 @@ def _extract_json(text: str) -> dict:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < 0:
         raise ValueError("no JSON object in reply")
-    return json.loads(text[start:end + 1])
+    return json.loads(text[start : end + 1])
 
 
 class OpenAITranslator:
     def __init__(self, base_url: str, api_key: str, model: str, cfg, system_prompt: bool = False):
         if not api_key:
-            raise RuntimeError("LLM_API_KEY is not set (see .env.example), or set translate.backend = \"mock\".")
+            raise RuntimeError(
+                'LLM_API_KEY is not set (see .env.example), or set translate.backend = "mock".'
+            )
         if ":generateContent" in base_url or base_url.rstrip("/").endswith("/chat/completions"):
             raise RuntimeError(
                 "LLM_BASE_URL must be the OpenAI-compatible API root, not a full endpoint URL. "
-                "For Google AI Studio use LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ "
-                "and put the model name in LLM_MODEL.")
+                "For Google AI Studio use "
+                "LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/ "
+                "and put the model name in LLM_MODEL."
+            )
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.key, self.model, self.cfg, self.system_prompt = api_key, model, cfg, system_prompt
         self.limiter = RateLimiter(cfg.rpm, cfg.tpm)
@@ -107,8 +118,9 @@ class OpenAITranslator:
             messages = [{"role": "user", "content": INSTRUCTIONS + "\n\n" + prompt}]
         body = {"model": self.model, "messages": messages, "temperature": self.cfg.temperature}
         await self.limiter.acquire(_est_tokens(INSTRUCTIONS + prompt) * 2)
-        async with self._session.post(self.url, json=body,
-                                      headers={"Authorization": f"Bearer {self.key}"}) as r:
+        async with self._session.post(
+            self.url, json=body, headers={"Authorization": f"Bearer {self.key}"}
+        ) as r:
             text = await r.text()
             if r.status == 429 or r.status >= 500:
                 raise _Retryable(f"HTTP {r.status}: {text[:300]}")
@@ -117,8 +129,9 @@ class OpenAITranslator:
             data = json.loads(text)
             return data["choices"][0]["message"]["content"] or ""
 
-    async def translate(self, batch: list[Line], context: list[Line],
-                        budgets: dict[int, int] | None = None) -> dict[int, str]:
+    async def translate(
+        self, batch: list[Line], context: list[Line], budgets: dict[int, int] | None = None
+    ) -> dict[int, str]:
         prompt = ""
         if context:
             prompt += "Previous lines, for context only (do not translate):\n"
@@ -126,8 +139,13 @@ class OpenAITranslator:
             prompt += "\n\n"
         prompt += "Translate these lines:\n"
         budgets = budgets or {}
-        prompt += json.dumps({str(l.id): {"en": l.en, "max_chars": budgets[l.id]} if l.id in budgets
-                              else {"en": l.en} for l in batch}, ensure_ascii=False)
+        prompt += json.dumps(
+            {
+                str(l.id): {"en": l.en, "max_chars": budgets[l.id]} if l.id in budgets else {"en": l.en}
+                for l in batch
+            },
+            ensure_ascii=False,
+        )
         want = {l.id for l in batch}
         delay = 2.0
         for attempt in range(self.cfg.max_retries + 1):
@@ -138,7 +156,7 @@ class OpenAITranslator:
                 if missing:
                     raise _Retryable(f"{len(missing)} of {len(want)} line ids missing in reply")
                 return {k: got[k] for k in want}
-            except (_Retryable, ValueError, json.JSONDecodeError, aiohttp.ClientError, asyncio.TimeoutError, KeyError) as e:
+            except (TimeoutError, _Retryable, ValueError, aiohttp.ClientError, KeyError) as e:
                 if attempt == self.cfg.max_retries:
                     raise RuntimeError(f"translation failed after retries: {e}") from e
                 log.warning("translate retry %d: %s", attempt + 1, e)
@@ -154,11 +172,22 @@ class _Retryable(Exception):
 class MockTranslator:
     """Offline stand-in: plausible-length Japanese-looking text, no API calls."""
 
-    PHRASES = ["はい、そうです。", "ちょっと待って。", "本当に？", "それは違うよ。", "わかりました。",
-               "なんでだよ！", "もう一回言って。", "いいね、それ。", "えっと、つまり", "そんなことない。"]
+    PHRASES = (
+        "はい、そうです。",
+        "ちょっと待って。",
+        "本当に？",
+        "それは違うよ。",
+        "わかりました。",
+        "なんでだよ！",
+        "もう一回言って。",
+        "いいね、それ。",
+        "えっと、つまり",
+        "そんなことない。",
+    )
 
-    async def translate(self, batch: list[Line], context: list[Line],
-                        budgets: dict[int, int] | None = None) -> dict[int, str]:
+    async def translate(
+        self, batch: list[Line], context: list[Line], budgets: dict[int, int] | None = None
+    ) -> dict[int, str]:
         out = {}
         for l in batch:
             n = max(1, round(len(l.en) / 22))

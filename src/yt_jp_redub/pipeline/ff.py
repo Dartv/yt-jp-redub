@@ -24,14 +24,20 @@ def run_ffmpeg(args: list[str], quiet: bool = True, cwd: Path | None = None) -> 
     cmd = [_bin("ffmpeg"), "-y", "-hide_banner", "-nostdin"]
     if quiet:
         cmd += ["-loglevel", "error"]
-    p = subprocess.run(cmd + args, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=cwd)
+    p = subprocess.run(
+        cmd + args, capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=cwd
+    )
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg failed: {' '.join(args[:12])}...\n{p.stderr[-2000:]}")
 
 
 def probe(path: Path) -> dict:
-    p = subprocess.run([_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format",
-                        "-show_streams", str(path)], capture_output=True, text=True, encoding="utf-8")
+    p = subprocess.run(
+        [_bin("ffprobe"), "-v", "error", "-print_format", "json", "-show_format", "-show_streams", str(path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+    )
     if p.returncode != 0:
         raise RuntimeError(f"ffprobe failed on {path}: {p.stderr}")
     return json.loads(p.stdout)
@@ -55,8 +61,24 @@ def read_slice(path: Path, start: float, end: float) -> tuple[np.ndarray, int]:
 
 def decode_pcm(path: Path, sr: int = SR, channels: int = 2) -> np.ndarray:
     """Decodes any audio file to float32 (frames, channels)."""
-    p = subprocess.run([_bin("ffmpeg"), "-v", "error", "-nostdin", "-i", str(path), "-f", "f32le",
-                        "-ac", str(channels), "-ar", str(sr), "-"], capture_output=True)
+    p = subprocess.run(
+        [
+            _bin("ffmpeg"),
+            "-v",
+            "error",
+            "-nostdin",
+            "-i",
+            str(path),
+            "-f",
+            "f32le",
+            "-ac",
+            str(channels),
+            "-ar",
+            str(sr),
+            "-",
+        ],
+        capture_output=True,
+    )
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg could not decode {path}: {p.stderr.decode(errors='replace')[-500:]}")
     return np.frombuffer(p.stdout, dtype=np.float32).reshape(-1, channels)
@@ -74,6 +96,7 @@ def resample(data: np.ndarray, sr_from: int, sr_to: int) -> np.ndarray:
         return data
     import torch
     import torchaudio.functional as F
+
     t = torch.from_numpy(np.ascontiguousarray(data.T))
     return F.resample(t, sr_from, sr_to).numpy().T.astype(np.float32)
 

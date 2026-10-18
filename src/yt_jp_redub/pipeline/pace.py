@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
-BASE_SEC = 0.85       # fixed cost of any TTS utterance (measured on IndexTTS-2.5: ~0.9 s)
-SEC_PER_CHAR = 0.11   # natural pace per kana/kanji (measured: 0.112 s)
+BASE_SEC = 0.85  # fixed cost of any TTS utterance (measured on IndexTTS-2.5: ~0.9 s)
+SEC_PER_CHAR = 0.11  # natural pace per kana/kanji (measured: 0.112 s)
 _SILENT = set("、。！？!?…「」『』（）()・ー～〜,.")
 
 

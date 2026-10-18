@@ -44,7 +44,6 @@ It prints the library address, for example `http://192.168.1.20:8765/`. The addr
 - **Library page:** paste a link into the box.
 - **Bookmarklet (PC):** drag "Dub this" from the library page's help section to your bookmarks bar, then click it on any YouTube video page.
 - **CLI:** `uv run yt-jp-redub add <url>` queues the video on the running server and opens the player.
-- **Telegram (optional):** see below.
 
 Jobs run one at a time, first in first out, with no length cap. Re-submitting a link that's already done or in progress just opens it again.
 
@@ -82,16 +81,6 @@ Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionar
 
 - **PC:** in asbplayer's settings → Misc, enable the WebSocket client with `ws://127.0.0.1:8766/ws`. When a video's full subtitles are ready and its player page is open, they load into asbplayer automatically. The **asbplayer** button re-sends them.
 - **Android (Firefox):** asbplayer's WebSocket client isn't available there. Once subtitles are complete, open the asbplayer extension on the player page and pick the 日本語/English tracks; the page exposes them through `<track>` elements and asbplayer's page protocol. That protocol is undocumented, so the built-in subtitles are the fallback.
-
-## Telegram bot (optional)
-
-Useful on Android: share a video from the YouTube app straight to the bot. Links sent while the PC is off wait in Telegram for about 24 h.
-
-1. Message [@BotFather](https://t.me/BotFather) and send `/newbot`. Copy the token.
-2. Get your numeric user ID, e.g. from [@userinfobot](https://t.me/userinfobot).
-3. In `.env`, set `TELEGRAM_BOT_TOKEN=…` and `TELEGRAM_ALLOWED_USER_ID=…`, then restart `serve`.
-
-The bot only answers that one user. It replies to any message containing YouTube links with one status message per video, edited in place (queued → downloading → transcribing → translating → dubbing → complete), with the player link. It uses polling, so no port needs to be opened to the internet.
 
 ## Configuration
 

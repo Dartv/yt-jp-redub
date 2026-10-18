@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from pathlib import Path
 
 from aiohttp import web
 
@@ -49,7 +48,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         try:
             vid, _ = worker.submit(url)
         except ValueError:
-            raise web.HTTPBadRequest(text=f"Not a YouTube video URL: {url}")
+            raise web.HTTPBadRequest(text=f"Not a YouTube video URL: {url}") from None
         raise web.HTTPFound(f"/watch/{vid}")
 
     r.add_get("/", index)
@@ -60,11 +59,14 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     # ------------------------------------------------------------- API
     async def api_info(_):
         b = base()
-        return web.json_response({
-            "base_url": b, "ws_port": cfg.server.ws_port,
-            "bookmarklet": f"javascript:location.href='{b}/add?url='+encodeURIComponent(location.href)",
-            "head_start_sec": cfg.stream.head_start_sec,
-        })
+        return web.json_response(
+            {
+                "base_url": b,
+                "ws_port": cfg.server.ws_port,
+                "bookmarklet": f"javascript:location.href='{b}/add?url='+encodeURIComponent(location.href)",
+                "head_start_sec": cfg.stream.head_start_sec,
+            }
+        )
 
     async def api_submit(req):
         data = await req.json() if req.content_type == "application/json" else await req.post()
@@ -89,7 +91,11 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         vid = req.match_info["vid"]
         job_or_404(vid)
         doc = worker.doc(vid)
-        lines = [{"id": l.id, "start": l.start, "end": l.end, "en": l.en, "ja": l.ja} for l in doc.lines] if doc else []
+        lines = (
+            [{"id": l.id, "start": l.start, "end": l.end, "en": l.en, "ja": l.ja} for l in doc.lines]
+            if doc
+            else []
+        )
         return web.json_response({"lines": lines}, headers=NO_STORE)
 
     async def api_playhead(req):
@@ -170,8 +176,11 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         doc = worker.doc(vid)
         if doc is None:
             raise web.HTTPServiceUnavailable(headers={"Retry-After": "3"})
-        return web.Response(text=hls.audio_playlist(doc, req.match_info["lang"]),
-                            content_type="application/vnd.apple.mpegurl", headers=NO_STORE)
+        return web.Response(
+            text=hls.audio_playlist(doc, req.match_info["lang"]),
+            content_type="application/vnd.apple.mpegurl",
+            headers=NO_STORE,
+        )
 
     async def audio_segment(req):
         vid, paths = media_paths(req)
@@ -194,7 +203,9 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         if not p.exists():
             raise web.HTTPNotFound()
         ctype = "text/vtt" if ext == "vtt" else "application/x-subrip"
-        return web.Response(body=p.read_bytes(), headers={"Content-Type": f"{ctype}; charset=utf-8", **NO_STORE})
+        return web.Response(
+            body=p.read_bytes(), headers={"Content-Type": f"{ctype}; charset=utf-8", **NO_STORE}
+        )
 
     async def thumb(req):
         vid, paths = media_paths(req)

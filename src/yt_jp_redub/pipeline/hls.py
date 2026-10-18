@@ -25,12 +25,34 @@ def prepare_video(paths: VideoPaths, seg_sec: int = 6) -> None:
     vdir.mkdir(parents=True, exist_ok=True)
     # run inside video/ so the init segment and fragments land there (ffmpeg resolves
     # -hls_fmp4_init_filename against its working directory)
-    ff.run_ffmpeg([
-        "-i", str(paths.video.resolve()), "-map", "0:v:0", "-c", "copy", "-avoid_negative_ts", "make_zero",
-        "-f", "hls", "-hls_time", str(seg_sec), "-hls_playlist_type", "vod",
-        "-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", "init.mp4",
-        "-hls_segment_filename", "%05d.m4s", "-hls_flags", "independent_segments", "index.m3u8",
-    ], cwd=vdir)
+    ff.run_ffmpeg(
+        [
+            "-i",
+            str(paths.video.resolve()),
+            "-map",
+            "0:v:0",
+            "-c",
+            "copy",
+            "-avoid_negative_ts",
+            "make_zero",
+            "-f",
+            "hls",
+            "-hls_time",
+            str(seg_sec),
+            "-hls_playlist_type",
+            "vod",
+            "-hls_segment_type",
+            "fmp4",
+            "-hls_fmp4_init_filename",
+            "init.mp4",
+            "-hls_segment_filename",
+            "%05d.m4s",
+            "-hls_flags",
+            "independent_segments",
+            "index.m3u8",
+        ],
+        cwd=vdir,
+    )
     fixed = []
     for line in (vdir / "index.m3u8").read_text(encoding="utf-8").splitlines():
         if line.startswith("#EXT-X-MAP:"):
@@ -59,7 +81,9 @@ def _syncsafe(n: int) -> bytes:
 def encode_segment(wav: Path, out: Path, start_sec: float, bitrate: str = "160k", sr: int = ff.SR) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_suffix(".tmp.aac")
-    ff.run_ffmpeg(["-i", str(wav), "-c:a", "aac", "-b:a", bitrate, "-ar", str(sr), "-ac", "2", "-f", "adts", str(tmp)])
+    ff.run_ffmpeg(
+        ["-i", str(wav), "-c:a", "aac", "-b:a", bitrate, "-ar", str(sr), "-ac", "2", "-f", "adts", str(tmp)]
+    )
     pts = max(0, round((start_sec - AAC_PRIMING / sr) * 90000))
     with open(out.with_suffix(".part"), "wb") as f:
         f.write(_id3_timestamp(pts))
@@ -83,8 +107,13 @@ def encode_en_segments(paths: VideoPaths, doc: LinesDoc) -> None:
 
 def audio_playlist(doc: LinesDoc, lang: str) -> str:
     target = max(1, int(max((c.duration for c in doc.chunks), default=1) + 0.999))
-    out = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{target}",
-           "#EXT-X-MEDIA-SEQUENCE:0", "#EXT-X-PLAYLIST-TYPE:VOD"]
+    out = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        f"#EXT-X-TARGETDURATION:{target}",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-PLAYLIST-TYPE:VOD",
+    ]
     for c in doc.chunks:
         out += [f"#EXTINF:{c.duration:.3f},", f"{lang}/{c.id:04d}.aac"]
     out.append("#EXT-X-ENDLIST")
@@ -92,7 +121,9 @@ def audio_playlist(doc: LinesDoc, lang: str) -> str:
 
 
 def _avc_codec(stream: dict) -> str:
-    prof = {"Baseline": 0x42, "Constrained Baseline": 0x42, "Main": 0x4D, "High": 0x64}.get(stream.get("profile"), 0x64)
+    prof = {"Baseline": 0x42, "Constrained Baseline": 0x42, "Main": 0x4D, "High": 0x64}.get(
+        stream.get("profile"), 0x64
+    )
     constraint = 0x40 if stream.get("profile") == "Constrained Baseline" else 0
     return f"avc1.{prof:02x}{constraint:02x}{int(stream.get('level', 40)):02x}"
 
@@ -103,10 +134,12 @@ def master_playlist(paths: VideoPaths, langs: tuple[str, ...] = ("ja", "en")) ->
     names = {"ja": "日本語", "en": "English"}
     out = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]
     for i, lang in enumerate(langs):
-        out.append(f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="{names[lang]}",LANGUAGE="{lang}",'
-                   f'DEFAULT={"YES" if i == 0 else "NO"},AUTOSELECT=YES,CHANNELS="2",URI="audio_{lang}.m3u8"')
+        out.append(
+            f'#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="aud",NAME="{names[lang]}",LANGUAGE="{lang}",'
+            f'DEFAULT={"YES" if i == 0 else "NO"},AUTOSELECT=YES,CHANNELS="2",URI="audio_{lang}.m3u8"'
+        )
     bw = int(float(v.get("bit_rate") or 4_000_000)) + 200_000
-    res = f',RESOLUTION={v["width"]}x{v["height"]}' if v.get("width") else ""
+    res = f",RESOLUTION={v['width']}x{v['height']}" if v.get("width") else ""
     out.append(f'#EXT-X-STREAM-INF:BANDWIDTH={bw},CODECS="{codecs}"{res},AUDIO="aud"')
     out.append("video.m3u8")
     return "\n".join(out) + "\n"

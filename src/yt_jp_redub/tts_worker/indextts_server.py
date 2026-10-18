@@ -35,8 +35,13 @@ def main():
     args = ap.parse_args()
 
     from indextts.infer_v2_5 import IndexTTS2
-    tts = IndexTTS2(cfg_path=os.path.join(args.model_dir, "config.yaml"), model_dir=args.model_dir,
-                    use_bf16=args.bf16, device=args.device)
+
+    tts = IndexTTS2(
+        cfg_path=os.path.join(args.model_dir, "config.yaml"),
+        model_dir=args.model_dir,
+        use_bf16=args.bf16,
+        device=args.device,
+    )
     reply({"ready": True, "device": str(tts.device)})
 
     for raw in sys.stdin:
@@ -49,10 +54,14 @@ def main():
         t0 = time.time()
         try:
             tts.infer(
-                spk_audio_prompt=req["ref"], text=req["text"], output_path=req["out"],
-                lang=req.get("lang", "JA"), emo_audio_prompt=req.get("emo_ref"),
+                spk_audio_prompt=req["ref"],
+                text=req["text"],
+                output_path=req["out"],
+                lang=req.get("lang", "JA"),
+                emo_audio_prompt=req.get("emo_ref"),
                 emo_alpha=float(req.get("emo_alpha", 1.0)),
-                duration_factor=float(req.get("duration_factor", 1.0)), verbose=False,
+                duration_factor=float(req.get("duration_factor", 1.0)),
+                verbose=False,
             )
             if not os.path.exists(req["out"]):
                 raise RuntimeError("no audio produced")

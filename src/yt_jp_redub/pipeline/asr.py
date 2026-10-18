@@ -7,8 +7,8 @@ length limit); token timestamps are merged into words.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -22,6 +22,7 @@ MODELS_DIR = ROOT / "models"
 
 def _providers(device: str) -> list[str]:
     import onnxruntime as ort
+
     avail = ort.get_available_providers()
     if device == "cuda" and "CUDAExecutionProvider" in avail:
         _preload_cuda_dlls()
@@ -36,6 +37,7 @@ def _preload_cuda_dlls() -> None:
     try:
         import onnxruntime as ort
         import torch  # noqa: F401  (loads its bundled CUDA libraries)
+
         if hasattr(ort, "preload_dlls"):
             ort.preload_dlls(cuda=True, cudnn=True, msvc=True, directory="")
     except Exception as e:  # pragma: no cover
@@ -46,13 +48,15 @@ def load(model_name: str, device: str):
     key = (model_name, device)
     if key not in _MODEL_CACHE:
         import onnx_asr
+
         prov = _providers(device)
         log.info("Loading ASR %s on %s", model_name, prov[0])
         # A plain local directory: onnxruntime rejects external weight data behind HF cache symlinks.
         model = onnx_asr.load_model(model_name, path=MODELS_DIR / model_name, providers=prov)
         vad = onnx_asr.load_vad("silero", path=MODELS_DIR / "silero-vad", providers=["CPUExecutionProvider"])
-        _MODEL_CACHE[key] = model.with_vad(vad, max_speech_duration_s=25, min_silence_duration_ms=250,
-                                           speech_pad_ms=60, batch_size=4).with_timestamps()
+        _MODEL_CACHE[key] = model.with_vad(
+            vad, max_speech_duration_s=25, min_silence_duration_ms=250, speech_pad_ms=60, batch_size=4
+        ).with_timestamps()
     return _MODEL_CACHE[key]
 
 
@@ -60,7 +64,7 @@ def tokens_to_words(tokens: list[str], stamps: list[float], seg_start: float, se
     """Merges subword tokens into words. A token starting with a space (or ▁) starts a new word."""
     words: list[Word] = []
     cur, cur_start = "", None
-    for i, (tok, ts) in enumerate(zip(tokens, stamps)):
+    for tok, ts in zip(tokens, stamps, strict=False):
         starts_word = tok.startswith((" ", "▁")) or not cur
         piece = tok.replace("▁", " ")
         if starts_word and cur.strip():
@@ -79,8 +83,9 @@ def tokens_to_words(tokens: list[str], stamps: list[float], seg_start: float, se
     return words
 
 
-def transcribe(wav16k: np.ndarray, model_name: str, device: str,
-               progress: Callable[[float], None] | None = None) -> list[Word]:
+def transcribe(
+    wav16k: np.ndarray, model_name: str, device: str, progress: Callable[[float], None] | None = None
+) -> list[Word]:
     """wav16k: float32 mono at 16 kHz. Returns words with absolute timestamps."""
     asr = load(model_name, device)
     total = len(wav16k) / 16000
@@ -98,6 +103,8 @@ def transcribe(wav16k: np.ndarray, model_name: str, device: str,
 
 def load_audio_16k(path: Path) -> np.ndarray:
     import soundfile as sf
+
     from .ff import resample
+
     data, sr = sf.read(str(path), dtype="float32", always_2d=True)
     return resample(data.mean(axis=1, keepdims=True), sr, 16000)[:, 0]

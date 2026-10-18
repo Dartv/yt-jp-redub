@@ -21,15 +21,6 @@ def youtube_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
-def find_youtube_urls(text: str) -> list[str]:
-    seen, out = set(), []
-    for m in YT_ID_RE.finditer(text):
-        if m.group(1) not in seen:
-            seen.add(m.group(1))
-            out.append(f"https://www.youtube.com/watch?v={m.group(1)}")
-    return out
-
-
 @dataclass
 class Word:
     text: str
@@ -66,11 +57,14 @@ class LinesDoc:
     chunks: list[Chunk]
 
     def to_json(self) -> dict:
-        return {"duration": self.duration, "lines": [asdict(l) for l in self.lines],
-                "chunks": [asdict(c) for c in self.chunks]}
+        return {
+            "duration": self.duration,
+            "lines": [asdict(l) for l in self.lines],
+            "chunks": [asdict(c) for c in self.chunks],
+        }
 
     @classmethod
-    def from_json(cls, d: dict) -> "LinesDoc":
+    def from_json(cls, d: dict) -> LinesDoc:
         return cls(d["duration"], [Line(**l) for l in d["lines"]], [Chunk(**c) for c in d["chunks"]])
 
     def chunk_at(self, t: float) -> int:
@@ -101,9 +95,9 @@ class VideoPaths:
         self.id = video_id
         self.root = videos_dir / video_id
 
-    video = property(lambda s: s.root / "source.mp4")          # video-only, H.264
-    audio = property(lambda s: s.root / "source.m4a")          # original audio, untouched
-    audio_wav = property(lambda s: s.root / "source.wav")      # 44.1 kHz stereo PCM of the original
+    video = property(lambda s: s.root / "source.mp4")  # video-only, H.264
+    audio = property(lambda s: s.root / "source.m4a")  # original audio, untouched
+    audio_wav = property(lambda s: s.root / "source.wav")  # 44.1 kHz stereo PCM of the original
     info = property(lambda s: s.root / "info.json")
     thumb = property(lambda s: s.root / "thumb.jpg")
     transcript = property(lambda s: s.root / "transcript.json")

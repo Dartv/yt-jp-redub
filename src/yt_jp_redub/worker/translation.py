@@ -8,15 +8,15 @@ from ..models import Line, LinesDoc, VideoPaths
 from ..pipeline import subs
 from ..pipeline.translate import char_budgets
 
-HEAD_BATCH = 12   # chunks about to be watched go out in small batches: latency follows output length
+HEAD_BATCH = 12  # chunks about to be watched go out in small batches: latency follows output length
 
 
 async def translate_video(w, vid: str, doc: LinesDoc) -> None:
     """Fills line.ja for every line, saving lines.json and the subtitle files after each batch."""
     paths, cfg = w.paths(vid), w.cfg.translate
-    budgets = char_budgets(doc.lines)   # how much Japanese fits each line's timing
+    budgets = char_budgets(doc.lines)  # how much Japanese fits each line's timing
     in_flight: set[int] = set()
-    save_lock = asyncio.Lock()   # batches finish together; one writer at a time
+    save_lock = asyncio.Lock()  # batches finish together; one writer at a time
 
     def next_batch() -> list[Line] | None:
         """Untranslated lines of the most urgent chunk that has any. Batches never cross chunk
@@ -39,7 +39,8 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
         first = batch[0].id
         try:
             result = await w.models.translator.translate(
-                batch, doc.lines[max(0, first - cfg.context_lines): first], budgets)
+                batch, doc.lines[max(0, first - cfg.context_lines) : first], budgets
+            )
             for l in batch:
                 l.ja = result[l.id]
         finally:

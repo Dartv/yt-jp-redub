@@ -1,7 +1,8 @@
+import itertools
 import struct
 import time
 
-from yt_jp_redub.models import Line, LinesDoc, Word, find_youtube_urls, youtube_id
+from yt_jp_redub.models import Line, LinesDoc, Word, youtube_id
 from yt_jp_redub.pipeline import hls, subs
 from yt_jp_redub.pipeline.asr import tokens_to_words
 from yt_jp_redub.pipeline.segment import lines_to_chunks, words_to_lines
@@ -14,8 +15,6 @@ def test_youtube_ids():
     assert youtube_id("https://www.youtube.com/live/abcdefghijk") == "abcdefghijk"
     assert youtube_id("https://m.youtube.com/shorts/abcdefghijk") == "abcdefghijk"
     assert youtube_id("https://example.com/") is None
-    assert find_youtube_urls("look https://youtu.be/abcdefghijk and https://youtu.be/abcdefghijk") == [
-        "https://www.youtube.com/watch?v=abcdefghijk"]
 
 
 def test_tokens_to_words():
@@ -33,7 +32,9 @@ def _words(text, start=0.0, step=0.3, pause_after=()):
 
 
 def test_lines_split_on_sentences_and_pauses():
-    lines = words_to_lines(_words("Yes, sir. I'd like an argument please. Mr. Smith is free", pause_after={6}))
+    lines = words_to_lines(
+        _words("Yes, sir. I'd like an argument please. Mr. Smith is free", pause_after={6})
+    )
     assert [l.en for l in lines] == ["Yes, sir.", "I'd like an argument please.", "Mr. Smith is free"]
 
 
@@ -51,7 +52,7 @@ def test_chunks_tile_timeline():
     lines = [Line(i, i * 5.0, i * 5.0 + 4.0, f"line {i}") for i in range(40)]
     chunks = lines_to_chunks(lines, 205.0, chunk_sec=60)
     assert chunks[0].start == 0 and chunks[-1].end == 205.0
-    for a, b in zip(chunks, chunks[1:]):
+    for a, b in itertools.pairwise(chunks):
         assert a.end == b.start
     assert sorted(i for c in chunks for i in c.line_ids) == list(range(40))
     for c in chunks:  # boundaries fall in gaps, never inside a line
@@ -82,9 +83,9 @@ def test_id3_timestamp():
 
 
 def test_vtt_and_playlist():
-    doc = LinesDoc(20.0, [Line(0, 1.0, 2.0, "Hi.", "やあ。", 0), Line(1, 1.5, 3.0, "Bye.", None, 0)],
-                   [])
+    doc = LinesDoc(20.0, [Line(0, 1.0, 2.0, "Hi.", "やあ。", 0), Line(1, 1.5, 3.0, "Bye.", None, 0)], [])
     from yt_jp_redub.models import Chunk
+
     doc.chunks = [Chunk(0, 0.0, 12.5, [0, 1]), Chunk(1, 12.5, 20.0, [])]
     v = subs.vtt(doc, "ja")
     assert "やあ。" in v and "Bye" not in v

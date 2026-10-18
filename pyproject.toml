@@ -9,7 +9,6 @@ requires-python = ">=3.11,<3.12"
 dependencies = [
   "aiohttp>=3.10",
   "python-dotenv>=1.0",
-  "yt-dlp>=2026.8.19",
   "numpy>=1.26,<2.3",
   "soundfile>=0.12",
   "onnx-asr[hub]>=0.7",
@@ -20,8 +19,8 @@ dependencies = [
   "torchaudio==2.8.*",
 ]
 
-[project.optional-dependencies]
-test = ["pytest>=8"]
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.13"]
 
 [project.scripts]
 yt-jp-redub = "yt_jp_redub.cli:main"
@@ -45,3 +44,18 @@ explicit = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+extend-exclude = ["third_party"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]
+ignore = [
+  "E741",    # `l` is the natural name for a subtitle line here
+  "RUF001",  # Japanese punctuation in strings is intentional
+  "RUF002",
+  "RUF003",
+  "B008",
+]

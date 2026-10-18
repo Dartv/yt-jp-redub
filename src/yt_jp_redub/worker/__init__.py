@@ -7,12 +7,13 @@ runs chunk by chunk in priority order as soon as a chunk's lines are translated.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
 import time
+from collections.abc import Callable
 from functools import cached_property
-from typing import Callable
 
 from ..config import Config
 from ..db import DB
@@ -38,16 +39,19 @@ class Models:
     @cached_property
     def separator(self):
         from ..pipeline.separate import make_separator
+
         return make_separator(self.cfg)
 
     @cached_property
     def tts(self):
         from ..pipeline.tts import make_tts
+
         return make_tts(self.cfg)
 
     @cached_property
     def translator(self):
         from ..pipeline.translate import make_translator
+
         return make_translator(self.cfg)
 
     def preload(self) -> None:
@@ -73,12 +77,12 @@ class Worker:
         self.sched = ChunkScheduler(cfg.stream.lookahead_chunks)
         self.pace = PaceModel()
         self.changed = asyncio.Condition()
-        self.progress: dict[str, float] = {}       # fraction of the current stage
+        self.progress: dict[str, float] = {}  # fraction of the current stage
         self.current: str | None = None
-        self.listeners: list[Listener] = []        # called with video_id on any update
-        self.subs_listeners: list[Listener] = []   # called when a video's full subtitles are ready
+        self.listeners: list[Listener] = []  # called with video_id on any update
+        self.subs_listeners: list[Listener] = []  # called when a video's full subtitles are ready
         self._wake = asyncio.Event()
-        self._docs: dict[str, LinesDoc] = {}       # live docs of jobs being processed
+        self._docs: dict[str, LinesDoc] = {}  # live docs of jobs being processed
         self._disk_docs: dict[str, tuple[float, LinesDoc]] = {}
 
     # ------------------------------------------------------------------ queries
@@ -102,10 +106,8 @@ class Worker:
 
     async def wait_change(self, timeout: float) -> None:
         async with self.changed:
-            try:
+            with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self.changed.wait(), timeout)
-            except asyncio.TimeoutError:
-                pass
 
     # ------------------------------------------------------------------ commands
     def submit(self, url: str) -> tuple[str, bool]:
@@ -141,6 +143,7 @@ class Worker:
         async def wake_waiters():
             async with self.changed:
                 self.changed.notify_all()
+
         asyncio.get_running_loop().create_task(wake_waiters())
         _emit(self.listeners, vid)
 
@@ -158,6 +161,7 @@ class Worker:
             if time.time() - last[0] > 1.0 or frac >= 1.0:
                 last[0] = time.time()
                 loop.call_soon_threadsafe(self.notify, vid)
+
         return cb
 
     # ------------------------------------------------------------------ the queue
@@ -194,13 +198,15 @@ class Worker:
             self.db.update_job(vid, total_lines=len(doc.lines), translated=sum(1 for l in doc.lines if l.ja))
             subs.write_all(doc, paths.subs)
             self.notify(vid)
-            # translation (priority-ordered), dubbing (per chunk) and the original-audio rendition run together
+            # translation (priority-ordered), dubbing (per chunk) and the original-audio rendition
+            # run together
             if any(not l.ja for l in doc.lines):
                 self.set_stage(vid, "translating")
             translation = asyncio.create_task(translate_video(self, vid, doc))
             # full subtitles go out (asbplayer) as soon as translation ends, long before the dub does
             translation.add_done_callback(
-                lambda t: t.cancelled() or t.exception() or _emit(self.subs_listeners, vid))
+                lambda t: t.cancelled() or t.exception() or _emit(self.subs_listeners, vid)
+            )
             original = asyncio.create_task(asyncio.to_thread(hls.encode_en_segments, paths, doc))
             try:
                 await dub_video(self, vid, doc, translation)
@@ -219,11 +225,19 @@ class Worker:
             info = json.loads(paths.info.read_text(encoding="utf-8"))
         else:
             self.set_stage(vid, "downloading")
-            info = await asyncio.to_thread(download.download, self.db.get_job(vid)["url"], paths,
-                                           cfg.download.max_height, cfg.download.cookies_file, self._progress_cb(vid))
+            info = await asyncio.to_thread(
+                download.download,
+                self.db.get_job(vid)["url"],
+                paths,
+                cfg.download.max_height,
+                cfg.download.cookies_file,
+                self._progress_cb(vid),
+            )
         if not paths.audio_wav.exists():
             await asyncio.to_thread(ff.to_wav, paths.audio, paths.audio_wav)
-        self.db.update_job(vid, title=info.get("title"), duration=await asyncio.to_thread(ff.duration, paths.audio_wav))
+        self.db.update_job(
+            vid, title=info.get("title"), duration=await asyncio.to_thread(ff.duration, paths.audio_wav)
+        )
         await asyncio.to_thread(hls.prepare_video, paths, cfg.stream.video_segment_sec)
 
     async def _transcribe(self, vid: str, paths: VideoPaths) -> LinesDoc:
@@ -251,6 +265,7 @@ class Worker:
     def _separate_full(self, paths: VideoPaths, out) -> None:
         import numpy as np
         import soundfile as sf
+
         total = ff.duration(paths.audio_wav)
         with sf.SoundFile(str(out), "w", samplerate=ff.SR, channels=2, subtype="PCM_16") as f:
             for t in range(0, int(total) + 1, 120):

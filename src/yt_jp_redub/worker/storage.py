@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ def dir_size(p: Path) -> int:
 
 
 def enforce_cap(db, videos_dir: Path, cap_gb: float, delete: Callable[[str], None]) -> list[str]:
-    cap = cap_gb * 1024 ** 3
+    cap = cap_gb * 1024**3
     jobs = db.list_jobs()
     sizes = {}
     for j in jobs:
@@ -22,8 +22,10 @@ def enforce_cap(db, videos_dir: Path, cap_gb: float, delete: Callable[[str], Non
         db.update_job(j["video_id"], size_bytes=sizes[j["video_id"]])
     total = sum(sizes.values())
     deleted = []
-    candidates = sorted((j for j in jobs if j["stage"] in ("done", "error")),
-                        key=lambda j: j["last_watched_at"] or j["updated_at"] or 0)
+    candidates = sorted(
+        (j for j in jobs if j["stage"] in ("done", "error")),
+        key=lambda j: j["last_watched_at"] or j["updated_at"] or 0,
+    )
     for j in candidates:
         if total <= cap:
             break

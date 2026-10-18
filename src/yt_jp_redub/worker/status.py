@@ -1,4 +1,4 @@
-"""The job status the player, library and bot read."""
+"""The job status the player and library read."""
 
 from __future__ import annotations
 
@@ -11,15 +11,23 @@ def job_status(w, video_id: str) -> dict | None:
     done = w.db.done_chunks(video_id)
     pending = [j["video_id"] for j in w.db.pending_jobs()]
     out = {
-        "video_id": video_id, "title": job["title"], "url": job["url"], "duration": job["duration"],
-        "stage": job["stage"], "error": job["error"], "stage_progress": w.progress.get(video_id),
-        "translated": job["translated"], "total_lines": job["total_lines"],
-        "chunks_done": len(done), "chunks_total": len(doc.chunks) if doc else 0,
+        "video_id": video_id,
+        "title": job["title"],
+        "url": job["url"],
+        "duration": job["duration"],
+        "stage": job["stage"],
+        "error": job["error"],
+        "stage_progress": w.progress.get(video_id),
+        "translated": job["translated"],
+        "total_lines": job["total_lines"],
+        "chunks_done": len(done),
+        "chunks_total": len(doc.chunks) if doc else 0,
         "chunks": [[c.start, c.end, c.id in done] for c in doc.chunks] if doc else [],
         "subs_complete": doc is not None and job["translated"] >= job["total_lines"],
         "ready": doc is not None and (w.paths(video_id).hls / "video.m3u8").exists(),
         "position": pending.index(video_id) if video_id in pending else None,
-        "last_watched_at": job["last_watched_at"], "size_bytes": job["size_bytes"],
+        "last_watched_at": job["last_watched_at"],
+        "size_bytes": job["size_bytes"],
     }
     out["percent"] = percent(out)
     return out

@@ -1,0 +1,15 @@
+{
+  "name": "yt-jp-redub-web",
+  "private": true,
+  "description": "Formatting for the web player (the app itself is Python; see pyproject.toml).",
+  "scripts": {
+    "fmt": "oxfmt web",
+    "fmt:check": "oxfmt --check web"
+  },
+  "devDependencies": {
+    "oxfmt": "0.73.0"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

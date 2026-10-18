@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import shutil
@@ -23,16 +24,18 @@ INDEXTTS_COMMIT = "d9e41aa"  # tested with IndexTTS-2.5 on Windows, 2026-10-18
 
 def _logging(verbose: bool) -> None:
     for stream in (sys.stdout, sys.stderr):
-        try:
+        with contextlib.suppress(AttributeError):  # replaced streams may not support it
             stream.reconfigure(encoding="utf-8", errors="replace")
-        except AttributeError:
-            pass
-    logging.basicConfig(level=logging.DEBUG if verbose else logging.INFO,
-                        format="%(asctime)s %(levelname).1s %(name)s: %(message)s", datefmt="%H:%M:%S")
+    logging.basicConfig(
+        level=logging.DEBUG if verbose else logging.INFO,
+        format="%(asctime)s %(levelname).1s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     for noisy in ("httpx", "httpx2", "httpcore", "huggingface_hub", "aiohttp.access", "urllib3"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     try:
         import onnxruntime
+
         onnxruntime.set_default_logger_severity(3)
     except ImportError:
         pass
@@ -61,53 +64,44 @@ async def _serve(cfg) -> None:
         runners.append(runner)
 
     base = public_base(cfg)
-    print(f"\n  yt-jp-redub is running\n"
-          f"  Library:   {base}/\n"
-          f"  Local:     http://127.0.0.1:{cfg.server.port}/\n"
-          f"  asbplayer: ws://127.0.0.1:{cfg.server.ws_port}/ws\n", flush=True)
+    print(
+        f"\n  yt-jp-redub is running\n"
+        f"  Library:   {base}/\n"
+        f"  Local:     http://127.0.0.1:{cfg.server.port}/\n"
+        f"  asbplayer: ws://127.0.0.1:{cfg.server.ws_port}/ws\n",
+        flush=True,
+    )
 
     await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
-    asyncio.get_running_loop().run_in_executor(None, worker.models.preload)  # models load while you browse
-    tasks = [asyncio.create_task(worker.run(), name="worker"),
-             asyncio.create_task(_check_ytdlp(), name="yt-dlp check")]
-    s = cfg.secrets
-    if s.telegram_bot_token:
-        from .bot import TelegramBot
-        bot = TelegramBot(s.telegram_bot_token, s.telegram_allowed_user_id, worker, lambda v: f"{public_base(cfg)}/watch/{v}")
-        tasks.append(asyncio.create_task(bot.run(), name="telegram"))
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, worker.models.preload)  # models load while you browse
+    loop.run_in_executor(None, _update_ytdlp)  # YouTube breaks old versions often
     try:
-        done, _ = await asyncio.wait([t for t in tasks if t.get_name() != "yt-dlp check"],
-                                     return_when=asyncio.FIRST_EXCEPTION)
-        for t in done:
-            t.result()
+        await worker.run()
     finally:
-        for t in tasks:
-            t.cancel()
         await worker.close()
         for r in runners:
             await r.cleanup()
 
 
-async def _check_ytdlp() -> None:
-    """YouTube changes break old yt-dlp versions; nudge when a newer one exists."""
+def _update_ytdlp() -> None:
+    from .pipeline import ytdlp
+
     try:
-        import yt_dlp
-        def latest():
-            with urllib.request.urlopen("https://pypi.org/pypi/yt-dlp/json", timeout=10) as r:
-                return json.load(r)["info"]["version"]
-        new = await asyncio.to_thread(latest)
-        cur = yt_dlp.version.__version__
-        if tuple(int(x) for x in new.split(".")[:3]) > tuple(int(x) for x in cur.split(".")[:3]):
-            log.warning("yt-dlp %s is available (installed %s). Update with: uv sync --upgrade-package yt-dlp",
-                        new, cur)
+        ytdlp.update()
+        log.info("yt-dlp %s", ytdlp.version())
     except Exception as e:
-        log.debug("yt-dlp update check failed: %s", e)
+        log.warning("yt-dlp update check failed: %s", e)
 
 
 # ---------------------------------------------------------------------------- add
 def _add(cfg, url: str, open_browser: bool) -> int:
-    req = urllib.request.Request(f"http://127.0.0.1:{cfg.server.port}/api/jobs", method="POST",
-                                 data=json.dumps({"url": url}).encode(), headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{cfg.server.port}/api/jobs",
+        method="POST",
+        data=json.dumps({"url": url}).encode(),
+        headers={"Content-Type": "application/json"},
+    )
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             data = json.load(r)
@@ -142,6 +136,7 @@ async def _process(cfg, url: str, out: Path | None) -> int:
                 timings[state["stage"]] = timings.get(state["stage"], 0) + time.time() - state["t"]
             state.update(stage=st, t=time.time())
             log.info("stage: %s", st)
+
     worker.listeners.append(on_update)
     t0 = time.time()
     try:
@@ -171,15 +166,20 @@ def _setup(cfg, skip_tts: bool) -> int:
     if not ok:
         return 1
 
-    for src, dst in ((ROOT / "config.example.toml", ROOT / "config.toml"), (ROOT / ".env.example", ROOT / ".env")):
+    for src, dst in (
+        (ROOT / "config.example.toml", ROOT / "config.toml"),
+        (ROOT / ".env.example", ROOT / ".env"),
+    ):
         if not dst.exists():
             shutil.copy(src, dst)
             print(f"✓ created {dst.name}")
     env_path = ROOT / ".env"
     env = env_path.read_text(encoding="utf-8")
     if "LLM_API_KEY=\n" in env or env.rstrip().endswith("LLM_API_KEY="):
-        print("\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
-              "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later).")
+        print(
+            "\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
+            "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later)."
+        )
         key = input("LLM API key: ").strip()
         if key:
             env_path.write_text(env.replace("LLM_API_KEY=", f"LLM_API_KEY={key}", 1), encoding="utf-8")
@@ -198,29 +198,41 @@ def _setup(cfg, skip_tts: bool) -> int:
         print("Installing the IndexTTS environment (several GB, takes a while)…")
         subprocess.run([uv, "sync", "--python", "3.11"], cwd=d, check=True)
         if not (d / "checkpoints" / "gpt.pth").exists():
-            print("Downloading IndexTTS-2.5 weights (~5 GB, Bilibili Model Use License: "
-                  "https://huggingface.co/IndexTeam/IndexTTS-2.5)…")
+            print(
+                "Downloading IndexTTS-2.5 weights (~5 GB, Bilibili Model Use License: "
+                "https://huggingface.co/IndexTeam/IndexTTS-2.5)…"
+            )
             from huggingface_hub import snapshot_download
+
             snapshot_download("IndexTeam/IndexTTS-2.5", local_dir=str(d / "checkpoints"))
         print("✓ IndexTTS-2.5 ready")
 
+    from .pipeline import ytdlp
+
+    ytdlp.update(force=True)
+    print(f"✓ yt-dlp {ytdlp.version()} (updates itself daily)")
+
     print("Downloading ASR and separation models…")
     from .pipeline import asr
+
     asr.load(cfg.asr.model, "cpu")
     from demucs.pretrained import get_model
+
     get_model(cfg.separate.model)
     print("✓ models ready")
 
-    port, ws = cfg.server.port, cfg.server.ws_port
+    port = cfg.server.port
     print("\nTo let your phone reach this PC, allow the port through the firewall once:")
     if sys.platform == "win32":
-        print(f'  (admin PowerShell) New-NetFirewallRule -DisplayName "yt-jp-redub" -Direction Inbound '
-              f'-Protocol TCP -LocalPort {port} -Action Allow -Profile Private')
+        print(
+            f'  (admin PowerShell) New-NetFirewallRule -DisplayName "yt-jp-redub" -Direction Inbound '
+            f"-Protocol TCP -LocalPort {port} -Action Allow -Profile Private"
+        )
     elif sys.platform == "darwin":
         print("  macOS asks the first time the server starts; click Allow.")
     else:
         print(f"  sudo ufw allow {port}/tcp   (only if ufw is enabled)")
-    print(f"\nDone. Start the server with:  uv run yt-jp-redub serve")
+    print("\nDone. Start the server with:  uv run yt-jp-redub serve")
     return 0
 
 
@@ -230,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--config", help="path to config.toml")
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p_serve = sub.add_parser("serve", help="run the server (player, library, worker, bot)")
+    p_serve = sub.add_parser("serve", help="run the server (player, library and worker)")
     p_add = sub.add_parser("add", help="queue a video on the running server")
     p_add.add_argument("url")
     p_add.add_argument("--no-open", action="store_true", help="don't open the player in the browser")
@@ -240,20 +252,24 @@ def main(argv: list[str] | None = None) -> int:
     p_setup = sub.add_parser("setup", help="install IndexTTS, download models, create config files")
     p_setup.add_argument("--skip-tts", action="store_true")
     for p in (p_serve, p_proc):
-        p.add_argument("--mock", action="store_true", help="use mock translation/separation/TTS (for testing)")
+        p.add_argument(
+            "--mock", action="store_true", help="use mock translation/separation/TTS (for testing)"
+        )
     args = ap.parse_args(argv)
     _logging(args.verbose)
 
     overrides = None
     if getattr(args, "mock", False):
-        overrides = {"translate": {"backend": "mock"}, "separate": {"backend": "mock"}, "tts": {"backend": "mock"}}
+        overrides = {
+            "translate": {"backend": "mock"},
+            "separate": {"backend": "mock"},
+            "tts": {"backend": "mock"},
+        }
     cfg = load_config(args.config, overrides)
 
     if args.cmd == "serve":
-        try:
+        with contextlib.suppress(KeyboardInterrupt):
             asyncio.run(_serve(cfg))
-        except KeyboardInterrupt:
-            pass
         return 0
     if args.cmd == "add":
         return _add(cfg, args.url, not args.no_open)
