@@ -89,7 +89,10 @@ def _speech_end(env_db: np.ndarray, hop: float, start: float, end: float, limit:
     return max(end, min(limit, i * hop))
 
 
-def _envelope_db(x: np.ndarray, sr: int, hop: float = 0.02) -> np.ndarray:
+ENV_HOP = 0.02
+
+
+def _envelope_db(x: np.ndarray, sr: int, hop: float = ENV_HOP) -> np.ndarray:
     h = int(hop * sr)
     n = len(x) // h
     e = np.sqrt(np.square(x[: n * h].reshape(n, h)).mean(axis=1)) + 1e-9
@@ -165,81 +168,30 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     out_path = cdir / "dub.wav"
     lines = [doc.lines[i] for i in chunk.line_ids if doc.lines[i].ja]
     orig, sr = ff.read_slice(paths.audio_wav, chunk.start, chunk.end)
-    n = len(orig)
-
     if not lines:  # no speech: keep the original audio
         ff.write_wav(out_path, orig, sr)
         return out_path
 
+    n = len(orig)
     vocals, background = _separate(paths, chunk, separator, sr, n)
     vocals16k = ff.resample(vocals.mean(axis=1, keepdims=True), sr, 16000)[:, 0]
     utts = group_utterances(lines, vocals16k, chunk.start, cfg.tts)
-
-    # references: the utterance's own vocals; fall back to the nearest one with usable audio
-    refs_dir, tts_dir = cdir / "refs", cdir / "tts"
-    refs_dir.mkdir(exist_ok=True)
-    tts_dir.mkdir(exist_ok=True)
-    refs = {u.id: _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, cfg.tts.min_ref_sec)
-            for u in utts}
-    good = [u for u in utts if ff.rms_db(refs[u.id]) > -38 and len(refs[u.id]) > sr]
-    ref_files: dict[int, Path] = {}
-    for u in utts:
-        src = u
-        if u not in good and good:
-            src = min(good, key=lambda g: abs(g.start - u.start))
-        p = refs_dir / f"{src.id:05d}.wav"
-        if not p.exists():
-            ff.write_wav(p, refs[src.id], sr)
-        ref_files[u.id] = p
+    refs = _write_references(utts, vocals, sr, chunk, cdir / "refs", cfg.tts.min_ref_sec)
+    (cdir / "tts").mkdir(exist_ok=True)
 
     voice = np.zeros((n, 1), dtype=np.float32)
-    min_factor, max_factor = 1.0 / cfg.tts.max_speedup, cfg.tts.max_slowdown
-    env_db, hop = _envelope_db(vocals.mean(axis=1), sr), 0.02
+    env_db = _envelope_db(vocals.mean(axis=1), sr)
     cursor = 0.0
     for k, u in enumerate(utts):
-        nxt_start = utts[k + 1].start - chunk.start if k + 1 < len(utts) else chunk.duration
-        slot_start = u.start - chunk.start
-        speech_end = _speech_end(env_db, hop, slot_start, u.end - chunk.start, nxt_start - GAP)
-        # pace from where this utterance will really start: after a spill, later ones speed up to catch up
-        start = max(slot_start, cursor + (GAP if cursor else 0.0))
-        # fill the time the original speech took, never past the next utterance
-        target = max(0.3, min(speech_end, nxt_start - GAP) - start)
-        factor = float(np.clip(target / pace.predict(u.text), min_factor, max_factor))
-        out = tts_dir / f"{u.id:05d}-{len(u.lines)}.wav"
-        wav, tsr, factor = _synth(tts, u, ref_files[u.id], out, factor)
-        natural = (len(wav) / tsr) / factor
-        pace.update(u.text, natural)
-        # one corrective take when the prediction missed badly (too short sounds like stopping early,
-        # too long means speeding up later lines)
-        better = float(np.clip(target / natural, min_factor, max_factor))
-        miss = len(wav) / tsr - target
-        if abs(miss) > max(0.4, 0.2 * target) and abs(better - factor) > 0.05:
-            wav, tsr, factor = _synth(tts, u, ref_files[u.id], out, better, force=True)
-        log.debug("utt %d lines=%d target=%.2f factor=%.2f got=%.2f late=%.2f early=%.2f", u.id, len(u.lines), target,
-                  factor, len(wav) / tsr, start - slot_start, speech_end - (start + len(wav) / tsr))
-        wav = ff.resample(wav, tsr, sr)
-
-        # loudness follows the original speech (shouting stays loud), within ±10 dB of -20 dBFS
-        orig_db = ff.rms_db(vocals[int(slot_start * sr): int((u.end - chunk.start) * sr)])
-        target_db = float(np.clip(orig_db, -30, -10)) if orig_db > -50 else -20.0
-        wav = wav * (10 ** ((target_db - ff.rms_db(wav)) / 20))
-
-        room = chunk.duration - start
-        if len(wav) / sr > room:  # would run past the chunk: squeeze, then cut with a fade
-            wav = _time_stretch(wav, sr, min(1.35, (len(wav) / sr) / max(room, 0.1)), cdir)
-            if len(wav) / sr > room:
-                # last resort: start earlier (overlapping the previous tail) rather than drop speech
-                start = max(slot_start - 0.5, chunk.duration - len(wav) / sr, 0.0)
-                start = min(start, max(0.0, chunk.duration - 0.3))
-                log.warning("utterance %d does not fit its chunk; overlapping by %.2fs", u.id, max(0, cursor - start))
-        wav = _fade(wav, sr)
-        a = min(int(start * sr), max(0, n - 1))
-        b = min(n, a + len(wav))
-        seg = wav[: b - a]
-        if len(seg) < len(wav):
-            seg = _fade(seg, sr, fade_in=0, fade_out=0.08)
-        voice[a:b] += seg
-        cursor = b / sr
+        rel = u.start - chunk.start
+        next_start = utts[k + 1].start - chunk.start if k + 1 < len(utts) else chunk.duration
+        # after a spill this starts late, and pacing below makes it catch up
+        start = max(rel, cursor + (GAP if cursor else 0.0))
+        speech_end = _speech_end(env_db, ENV_HOP, rel, u.end - chunk.start, next_start - GAP)
+        target = max(0.3, min(speech_end, next_start - GAP) - start)   # the time the original took
+        wav, tsr = _fit(tts, u, refs[u.id], cdir / "tts" / f"{u.id:05d}-{len(u.lines)}.wav", target, pace, cfg.tts)
+        wav = _match_loudness(ff.resample(wav, tsr, sr), vocals[int(rel * sr): int((u.end - chunk.start) * sr)])
+        cursor = _place(voice, wav, sr, start, rel, chunk.duration, cdir, u.id)
 
     mix = background + np.repeat(voice, 2, axis=1)
     peak = float(np.abs(mix).max())
@@ -248,6 +200,67 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     ff.write_wav(out_path, mix, sr)
     log.debug("chunk %d: %d lines voiced as %d utterances", chunk.id, len(lines), len(utts))
     return out_path
+
+
+def _write_references(utts: list[Utterance], vocals: np.ndarray, sr: int, chunk: Chunk, refs_dir: Path,
+                      min_sec: float) -> dict[int, Path]:
+    """Each utterance's own original vocals; quiet or very short ones borrow the nearest usable one."""
+    refs_dir.mkdir(exist_ok=True)
+    clips = {u.id: _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, min_sec) for u in utts}
+    usable = [u for u in utts if ff.rms_db(clips[u.id]) > -38 and len(clips[u.id]) > sr]
+    out = {}
+    for u in utts:
+        src = u if u in usable or not usable else min(usable, key=lambda g: abs(g.start - u.start))
+        p = refs_dir / f"{src.id:05d}.wav"
+        if not p.exists():
+            ff.write_wav(p, clips[src.id], sr)
+        out[u.id] = p
+    return out
+
+
+def _fit(tts, u: Utterance, ref: Path, out: Path, target: float, pace: PaceModel, cfg) -> tuple[np.ndarray, int]:
+    """Synthesizes the utterance paced to last about `target` seconds (within the speed limits).
+    A badly missed prediction gets one corrective take: too short sounds like stopping early,
+    too long pushes later lines back."""
+    lo, hi = 1.0 / cfg.max_speedup, cfg.max_slowdown
+    factor = float(np.clip(target / pace.predict(u.text), lo, hi))
+    wav, tsr, factor = _synth(tts, u, ref, out, factor)
+    natural = (len(wav) / tsr) / factor
+    pace.update(u.text, natural)
+    better = float(np.clip(target / natural, lo, hi))
+    if abs(len(wav) / tsr - target) > max(0.4, 0.2 * target) and abs(better - factor) > 0.05:
+        wav, tsr, factor = _synth(tts, u, ref, out, better, force=True)
+    log.debug("utt %d lines=%d target=%.2f factor=%.2f got=%.2f", u.id, len(u.lines), target, factor, len(wav) / tsr)
+    return wav, tsr
+
+
+def _match_loudness(wav: np.ndarray, original: np.ndarray) -> np.ndarray:
+    """Follows the original speech (shouting stays loud), within ±10 dB of -20 dBFS."""
+    orig_db = ff.rms_db(original)
+    target_db = float(np.clip(orig_db, -30, -10)) if orig_db > -50 else -20.0
+    return wav * (10 ** ((target_db - ff.rms_db(wav)) / 20))
+
+
+def _place(voice: np.ndarray, wav: np.ndarray, sr: int, start: float, rel: float, chunk_len: float,
+           tmp_dir: Path, uid: int) -> float:
+    """Mixes `wav` into the voice track at `start`; returns where it ends. Speech that would run
+    past the chunk is squeezed, then started earlier, and cut with a fade only as a last resort."""
+    room = chunk_len - start
+    if len(wav) / sr > room:
+        wav = _time_stretch(wav, sr, min(1.35, (len(wav) / sr) / max(room, 0.1)), tmp_dir)
+        if len(wav) / sr > room:
+            new_start = min(max(rel - 0.5, chunk_len - len(wav) / sr, 0.0), max(0.0, chunk_len - 0.3))
+            log.warning("utterance %d does not fit its chunk; overlapping by %.2fs", uid, max(0.0, start - new_start))
+            start = new_start
+    wav = _fade(wav, sr)
+    n = len(voice)
+    a = min(int(start * sr), max(0, n - 1))
+    b = min(n, a + len(wav))
+    seg = wav[: b - a]
+    if len(seg) < len(wav):
+        seg = _fade(seg, sr, fade_in=0, fade_out=0.08)
+    voice[a:b] += seg
+    return b / sr
 
 
 def _synth(tts, u: Utterance, ref: Path, out: Path, factor: float, force: bool = False):
