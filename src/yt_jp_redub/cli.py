@@ -181,7 +181,11 @@ def _setup(cfg, skip_tts: bool) -> int:
             "\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
             "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later)."
         )
-        key = input("LLM API key: ").strip()
+        try:
+            key = input("LLM API key: ").strip()
+        except EOFError:  # no terminal after all (Windows reports NUL as one)
+            key = ""
+            print()
         if key:
             env_path.write_text(env.replace("LLM_API_KEY=", f"LLM_API_KEY={key}", 1), encoding="utf-8")
             print("✓ saved to .env")
