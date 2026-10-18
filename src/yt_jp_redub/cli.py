@@ -150,6 +150,7 @@ async def _process(cfg, url: str, out: Path | None) -> int:
     paths = worker.paths(vid)
     out = out or Path.cwd() / f"{vid}.ja-dub.mkv"
     await asyncio.to_thread(write_mkv, paths, doc, out, job["title"] or vid)
+    worker.cleanup(paths)  # the video stays watchable in the library
     dur = job["duration"] or 1
     print(f"\nWrote {out}")
     print(f"Video length {dur:.0f}s, total {time.time() - t0:.0f}s (RTF {(time.time() - t0) / dur:.2f})")

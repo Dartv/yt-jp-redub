@@ -192,8 +192,7 @@ class Worker:
             await asyncio.to_thread(ff.to_wav, paths.audio, paths.audio_wav)
         dur = await asyncio.to_thread(ff.duration, paths.audio_wav)
         self.db.update_job(vid, title=info.get("title"), duration=dur)
-        if not offline:
-            await asyncio.to_thread(hls.prepare_video, paths, cfg.stream.video_segment_sec)
+        await asyncio.to_thread(hls.prepare_video, paths, cfg.stream.video_segment_sec)
 
         # 2. ASR over the whole video
         doc = paths.load_lines()
@@ -217,9 +216,8 @@ class Worker:
         #    original-audio rendition run together
         if any(not l.ja for l in doc.lines):
             self._set_stage(vid, "translating")
-        tasks = [asyncio.create_task(self._translate_all(vid, doc))]
-        if not offline:
-            tasks.append(asyncio.create_task(asyncio.to_thread(hls.encode_en_segments, paths, doc)))
+        tasks = [asyncio.create_task(self._translate_all(vid, doc)),
+                 asyncio.create_task(asyncio.to_thread(hls.encode_en_segments, paths, doc))]
         try:
             await self._dub_all(vid, doc, tasks[0], offline)
             for t in tasks:
@@ -230,7 +228,7 @@ class Worker:
                     t.cancel()
         self._set_stage(vid, "done")
         if not offline:
-            self._cleanup(paths)
+            self.cleanup(paths)
         self._docs.pop(vid, None)
         return doc
 
@@ -349,12 +347,10 @@ class Worker:
             return all(doc.lines[i].ja for i in doc.chunks[c].line_ids)
 
         while True:
-            done = self.db.done_chunks(vid)
-            # a chunk is only really done if its segment exists (data may have been removed by hand)
-            if offline:
-                done = {c for c in done if (paths.chunk_dir(c) / "dub.wav").exists()}
-            else:
-                done = {c for c in done if paths.seg("ja", c).exists()}
+            db_done = self.db.done_chunks(vid)
+            # a chunk is only really done if its segment exists (and, offline, its wav for the .mkv)
+            done = {c for c in db_done if paths.seg("ja", c).exists()
+                    and (not offline or (paths.chunk_dir(c) / "dub.wav").exists())}
             if len(done) >= n:
                 return
             c = self.sched.next(vid, n, done, eligible)
@@ -370,16 +366,17 @@ class Worker:
                 started = True
             chunk = doc.chunks[c]
             t0 = time.time()
-            wav = await asyncio.to_thread(dub_chunk, paths, doc, chunk, self._get_separator()
-                                          if chunk.line_ids else None, self._get_tts()
-                                          if chunk.line_ids else None, self.cfg, self._pace)
-            if not offline:
-                await asyncio.to_thread(hls.encode_segment, wav, paths.seg("ja", c), chunk.start)
+            wav = paths.chunk_dir(c) / "dub.wav"
+            if not (c in db_done and wav.exists()):  # otherwise only the HLS segment is missing
+                wav = await asyncio.to_thread(dub_chunk, paths, doc, chunk, self._get_separator()
+                                              if chunk.line_ids else None, self._get_tts()
+                                              if chunk.line_ids else None, self.cfg, self._pace)
+            await asyncio.to_thread(hls.encode_segment, wav, paths.seg("ja", c), chunk.start)
             self.db.chunk_done(vid, c)
             log.info("%s chunk %d/%d dubbed in %.1fs (%.1fs audio)", vid, c + 1, n, time.time() - t0, chunk.duration)
             self._notify(vid)
 
-    def _cleanup(self, paths: VideoPaths) -> None:
+    def cleanup(self, paths: VideoPaths) -> None:
         """Drop the large intermediates once the HLS segments exist."""
         for c in paths.chunks.glob("*"):
             for name in ("tts", "refs"):

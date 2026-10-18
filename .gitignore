@@ -12,3 +12,4 @@ config.mock.toml
 config.realtts.toml
 data_real/
 data_m1/
+samples/
