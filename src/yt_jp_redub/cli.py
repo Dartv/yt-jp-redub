@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import shutil
 import subprocess
 import sys
@@ -175,7 +176,7 @@ def _setup(cfg, skip_tts: bool) -> int:
             print(f"✓ created {dst.name}")
     env_path = ROOT / ".env"
     env = env_path.read_text(encoding="utf-8")
-    if "LLM_API_KEY=\n" in env or env.rstrip().endswith("LLM_API_KEY="):
+    if sys.stdin.isatty() and ("LLM_API_KEY=\n" in env or env.rstrip().endswith("LLM_API_KEY=")):
         print(
             "\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
             "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later)."
@@ -187,7 +188,7 @@ def _setup(cfg, skip_tts: bool) -> int:
 
     if not skip_tts:
         d = cfg.indextts_dir
-        uv = shutil.which("uv")
+        uv = os.environ.get("UV") or shutil.which("uv")  # `uv run` tells us where it is
         if not uv:
             print("✗ uv not found on PATH (https://docs.astral.sh/uv/)")
             return 1
@@ -219,6 +220,10 @@ def _setup(cfg, skip_tts: bool) -> int:
     from demucs.pretrained import get_model
 
     get_model(cfg.separate.model)
+    from .pipeline import speaker
+
+    if not speaker.available():
+        return 1
     print("✓ models ready")
 
     port = cfg.server.port
