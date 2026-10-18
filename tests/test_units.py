@@ -117,3 +117,50 @@ def test_llm_endpoint_paste_slips():
     assert normalize_endpoint(slip, "m") == ("https://generativelanguage.googleapis.com/v1beta/openai", "m")
     with pytest.raises(RuntimeError):
         normalize_endpoint("not a url", "m")
+
+
+def test_linux_interface_parsing(monkeypatch):
+    from yt_jp_redub import net
+
+    outputs = {
+        ("ip", "-4", "route", "show", "default"): "default via 192.168.1.1 dev wlp2s0 proto dhcp\n",
+        ("ip", "-4", "-o", "addr", "show"): (
+            "1: lo    inet 127.0.0.1/8 scope host lo\n"
+            "2: wlp2s0    inet 192.168.1.23/24 brd 192.168.1.255 scope global wlp2s0\n"
+            "3: docker0    inet 172.17.0.1/16 scope global docker0\n"
+            "4: tailscale0    inet 100.101.1.2/32 scope global tailscale0\n"
+        ),
+    }
+    monkeypatch.setattr(net, "_run", lambda cmd: outputs.get(tuple(cmd), ""))
+    monkeypatch.setattr(net.sys, "platform", "linux")
+    assert net._discover() == "192.168.1.23"
+
+
+def test_macos_interface_parsing(monkeypatch):
+    from yt_jp_redub import net
+
+    outputs = {
+        ("route", "-n", "get", "default"): "   route to: default\n  interface: en0\n",
+        ("ifconfig",): (
+            "lo0: flags=8049<UP,LOOPBACK>\n\tinet 127.0.0.1 netmask 0xff000000\n"
+            "en0: flags=8863<UP,BROADCAST>\n\tinet 10.0.0.42 netmask 0xffffff00 broadcast 10.0.0.255\n"
+            "utun3: flags=8051<UP>\n\tinet 10.8.0.2 --> 10.8.0.1 netmask 0xffffff00\n"
+        ),
+    }
+    monkeypatch.setattr(net, "_run", lambda cmd: outputs.get(tuple(cmd), ""))
+    monkeypatch.setattr(net.sys, "platform", "darwin")
+    assert net._discover() == "10.0.0.42"
+
+
+def test_ytdlp_release_asset_per_platform(monkeypatch):
+    from yt_jp_redub.pipeline import ytdlp
+
+    for plat, machine, asset in (
+        ("win32", "AMD64", "yt-dlp.exe"),
+        ("darwin", "arm64", "yt-dlp_macos"),
+        ("linux", "x86_64", "yt-dlp_linux"),
+        ("linux", "aarch64", "yt-dlp_linux_aarch64"),
+    ):
+        monkeypatch.setattr(ytdlp.sys, "platform", plat)
+        monkeypatch.setattr(ytdlp.platform, "machine", lambda m=machine: m)
+        assert ytdlp._asset() == asset
