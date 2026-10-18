@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import logging
-import shutil
 from pathlib import Path
+from typing import Callable
 
 log = logging.getLogger(__name__)
 
@@ -13,7 +13,7 @@ def dir_size(p: Path) -> int:
     return sum(f.stat().st_size for f in p.rglob("*") if f.is_file()) if p.exists() else 0
 
 
-def enforce_cap(db, videos_dir: Path, cap_gb: float, keep: set[str] = frozenset()) -> list[str]:
+def enforce_cap(db, videos_dir: Path, cap_gb: float, delete: Callable[[str], None]) -> list[str]:
     cap = cap_gb * 1024 ** 3
     jobs = db.list_jobs()
     sizes = {}
@@ -22,15 +22,14 @@ def enforce_cap(db, videos_dir: Path, cap_gb: float, keep: set[str] = frozenset(
         db.update_job(j["video_id"], size_bytes=sizes[j["video_id"]])
     total = sum(sizes.values())
     deleted = []
-    candidates = sorted((j for j in jobs if j["stage"] in ("done", "error") and j["video_id"] not in keep),
+    candidates = sorted((j for j in jobs if j["stage"] in ("done", "error")),
                         key=lambda j: j["last_watched_at"] or j["updated_at"] or 0)
     for j in candidates:
         if total <= cap:
             break
         vid = j["video_id"]
         log.info("Storage cap: deleting %s (%s)", vid, j.get("title"))
-        shutil.rmtree(videos_dir / vid, ignore_errors=True)
-        db.delete_job(vid)
+        delete(vid)
         total -= sizes[vid]
         deleted.append(vid)
     return deleted

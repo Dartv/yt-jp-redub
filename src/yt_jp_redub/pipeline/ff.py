@@ -53,6 +53,15 @@ def read_slice(path: Path, start: float, end: float) -> tuple[np.ndarray, int]:
     return data, sr
 
 
+def decode_pcm(path: Path, sr: int = SR, channels: int = 2) -> np.ndarray:
+    """Decodes any audio file to float32 (frames, channels)."""
+    p = subprocess.run([_bin("ffmpeg"), "-v", "error", "-nostdin", "-i", str(path), "-f", "f32le",
+                        "-ac", str(channels), "-ar", str(sr), "-"], capture_output=True)
+    if p.returncode != 0:
+        raise RuntimeError(f"ffmpeg could not decode {path}: {p.stderr.decode(errors='replace')[-500:]}")
+    return np.frombuffer(p.stdout, dtype=np.float32).reshape(-1, channels)
+
+
 def write_wav(path: Path, data: np.ndarray, sr: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.stem + ".tmp.wav")

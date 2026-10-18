@@ -18,6 +18,7 @@ from collections import deque
 import aiohttp
 
 from ..models import Line
+from .pace import char_budget
 
 log = logging.getLogger(__name__)
 
@@ -27,13 +28,22 @@ The audience is Japanese learners who will listen to the dub, so the Japanese mu
 Rules:
 - Match each speaker's register: casual stays casual (タメ口, contractions, fillers), polite stays polite, rude stays rude. Don't make everything です/ます.
 - Keep the emotion and personality: jokes, sarcasm, anger, excitement.
-- The dub has to fit the original timing, so keep each line about as short as the English. Prefer concise natural phrasing over literal completeness.
+- The dub has to fit the original timing. Each line comes with "max_chars": the most Japanese characters (kana/kanji, not counting punctuation) that can be spoken in the time the English line takes. Stay within it: paraphrase, drop filler words, use shorter natural phrasing. A short natural line beats a complete literal one.
 - Translate each line on its own (lines are spoken separately), but use the surrounding lines to keep pronouns, names and tone consistent.
 - Keep names in katakana; well-known brand or game names may stay in Latin letters.
 - Fillers like "uh", "um" become natural Japanese fillers (えっと, あの) or are dropped.
 - Write numbers the way they'd be spoken naturally; avoid symbols the voice can't read.
 - Output ONLY a JSON object mapping every line id (as a string) to its Japanese translation. No comments, no markdown.
 """
+
+
+def char_budgets(lines: list[Line]) -> dict[int, int]:
+    """Japanese characters each line can hold: its own time plus up to 0.5 s of the following pause."""
+    out = {}
+    for i, l in enumerate(lines):
+        nxt = lines[i + 1].start if i + 1 < len(lines) else l.end + 0.5
+        out[l.id] = char_budget(max(0.2, min(nxt, l.end + 0.5) - l.start))
+    return out
 
 
 class RateLimiter:
@@ -107,14 +117,17 @@ class OpenAITranslator:
             data = json.loads(text)
             return data["choices"][0]["message"]["content"] or ""
 
-    async def translate(self, batch: list[Line], context: list[Line]) -> dict[int, str]:
+    async def translate(self, batch: list[Line], context: list[Line],
+                        budgets: dict[int, int] | None = None) -> dict[int, str]:
         prompt = ""
         if context:
             prompt += "Previous lines, for context only (do not translate):\n"
             prompt += json.dumps([{"id": l.id, "en": l.en, "ja": l.ja} for l in context], ensure_ascii=False)
             prompt += "\n\n"
         prompt += "Translate these lines:\n"
-        prompt += json.dumps({str(l.id): l.en for l in batch}, ensure_ascii=False)
+        budgets = budgets or {}
+        prompt += json.dumps({str(l.id): {"en": l.en, "max_chars": budgets[l.id]} if l.id in budgets
+                              else {"en": l.en} for l in batch}, ensure_ascii=False)
         want = {l.id for l in batch}
         delay = 2.0
         for attempt in range(self.cfg.max_retries + 1):
@@ -144,7 +157,8 @@ class MockTranslator:
     PHRASES = ["はい、そうです。", "ちょっと待って。", "本当に？", "それは違うよ。", "わかりました。",
                "なんでだよ！", "もう一回言って。", "いいね、それ。", "えっと、つまり", "そんなことない。"]
 
-    async def translate(self, batch: list[Line], context: list[Line]) -> dict[int, str]:
+    async def translate(self, batch: list[Line], context: list[Line],
+                        budgets: dict[int, int] | None = None) -> dict[int, str]:
         out = {}
         for l in batch:
             n = max(1, round(len(l.en) / 22))

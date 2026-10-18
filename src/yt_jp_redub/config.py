@@ -20,12 +20,13 @@ DEFAULTS: dict = {
     "segment": {"max_line_chars": 120, "max_line_sec": 9.0, "pause_split_sec": 0.5, "chunk_sec": 60},
     "translate": {
         "backend": "openai", "batch_lines": 40, "context_lines": 8, "rpm": 25, "tpm": 14000,
-        "max_retries": 8, "temperature": 0.4, "concurrency": 3,
+        "max_retries": 20, "temperature": 0.4, "concurrency": 3,
     },
     "separate": {"backend": "demucs", "model": "htdemucs", "device": "cuda"},
     "tts": {
         "backend": "indextts", "indextts_dir": "third_party/index-tts", "lang": "JA",
-        "max_speedup": 1.5, "min_ref_sec": 3.0, "use_bf16": True, "emo_alpha": 1.0,
+        "max_speedup": 1.25, "max_slowdown": 1.2, "group_speakers": True, "speaker_sim": 0.55,
+        "group_gap_sec": 0.4, "group_max_sec": 12.0, "min_ref_sec": 3.0, "use_bf16": True, "emo_alpha": 1.0,
     },
     "stream": {"head_start_sec": 120, "lookahead_chunks": 3, "hold_sec": 20, "video_segment_sec": 6},
 }

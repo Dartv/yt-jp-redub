@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS notify (
   video_id TEXT NOT NULL,
   chat_id INTEGER NOT NULL,
   message_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'photo',
   last_text TEXT,
   PRIMARY KEY (video_id, chat_id, message_id)
 );
@@ -49,6 +50,9 @@ class DB:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(notify)")}
+            if "kind" not in cols:  # databases created before the column existed
+                self._conn.execute("ALTER TABLE notify ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo'")
 
     def _x(self, sql: str, args=()) -> list[sqlite3.Row]:
         with self._lock:
@@ -108,9 +112,10 @@ class DB:
         return self._x("SELECT COUNT(*) c FROM chunks WHERE video_id=?", (video_id,))[0]["c"]
 
     # telegram status messages
-    def add_notify(self, video_id: str, chat_id: int, message_id: int) -> None:
-        self._x("INSERT OR IGNORE INTO notify(video_id,chat_id,message_id) VALUES(?,?,?)",
-                (video_id, chat_id, message_id))
+    def add_notify(self, video_id: str, chat_id: int, message_id: int, kind: str, text: str) -> None:
+        """kind is "photo" (edited via its caption) or "text"."""
+        self._x("INSERT OR IGNORE INTO notify(video_id,chat_id,message_id,kind,last_text) VALUES(?,?,?,?,?)",
+                (video_id, chat_id, message_id, kind, text))
 
     def notifies(self, video_id: str) -> list[dict]:
         return [dict(r) for r in self._x("SELECT * FROM notify WHERE video_id=?", (video_id,))]

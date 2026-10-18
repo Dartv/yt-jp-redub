@@ -33,7 +33,7 @@ concurrency = 3           # batches translated in parallel (within the rpm limit
 context_lines = 8
 rpm = 25                  # requests per minute limit
 tpm = 14000               # tokens per minute limit (rough estimate on our side)
-max_retries = 8
+max_retries = 20
 temperature = 0.4
 
 [separate]
@@ -45,7 +45,12 @@ device = "cuda"
 backend = "indextts"      # "indextts" or "mock"
 indextts_dir = "third_party/index-tts"
 lang = "JA"
-max_speedup = 1.5         # lines are spoken up to this much faster to fit the original slot
+max_speedup = 1.25        # lines are spoken up to this much faster to fit the original slot
+max_slowdown = 1.2        # ...or this much slower, so speech fills the time the original took
+group_speakers = true     # voice a speaker's consecutive sentences as one utterance (smoother)
+speaker_sim = 0.55        # voice similarity needed to treat adjacent lines as the same speaker
+group_gap_sec = 0.4
+group_max_sec = 12
 min_ref_sec = 3.0         # shorter reference audio is padded with neighbouring audio
 use_bf16 = true
 emo_alpha = 1.0

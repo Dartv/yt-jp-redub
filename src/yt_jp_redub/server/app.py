@@ -79,8 +79,6 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         for j in worker.db.list_jobs():
             st = worker.status(j["video_id"])
             st.pop("chunks", None)
-            st["last_watched_at"] = j["last_watched_at"]
-            st["size_bytes"] = j["size_bytes"]
             out.append(st)
         return web.json_response({"jobs": out, "current": worker.current})
 
@@ -112,11 +110,10 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     async def api_delete(req):
         vid = req.match_info["vid"]
         job_or_404(vid)
-        if worker.current == vid:
-            return web.json_response({"error": "video is being processed"}, status=409)
-        import shutil
-        shutil.rmtree(worker.paths(vid).root, ignore_errors=True)
-        worker.db.delete_job(vid)
+        try:
+            worker.delete(vid)
+        except RuntimeError as e:
+            return web.json_response({"error": str(e)}, status=409)
         return web.json_response({"ok": True})
 
     async def api_asbplayer(req):

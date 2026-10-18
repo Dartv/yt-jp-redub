@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -83,7 +84,14 @@ def atomic_write_json(path: Path, obj) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
-    os.replace(tmp, path)
+    for attempt in range(20):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:  # Windows: a reader has the file open for a moment
+            if attempt == 19:
+                raise
+            time.sleep(0.05)
 
 
 class VideoPaths:
@@ -93,9 +101,6 @@ class VideoPaths:
         self.id = video_id
         self.root = videos_dir / video_id
 
-    def __getattr__(self, name):  # pragma: no cover - typo guard
-        raise AttributeError(name)
-
     video = property(lambda s: s.root / "source.mp4")          # video-only, H.264
     audio = property(lambda s: s.root / "source.m4a")          # original audio, untouched
     audio_wav = property(lambda s: s.root / "source.wav")      # 44.1 kHz stereo PCM of the original
@@ -103,7 +108,6 @@ class VideoPaths:
     thumb = property(lambda s: s.root / "thumb.jpg")
     transcript = property(lambda s: s.root / "transcript.json")
     lines = property(lambda s: s.root / "lines.json")
-    state = property(lambda s: s.root / "state.json")
     subs = property(lambda s: s.root / "subs")
     chunks = property(lambda s: s.root / "chunks")
     hls = property(lambda s: s.root / "hls")

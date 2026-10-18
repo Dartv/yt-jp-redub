@@ -13,3 +13,7 @@ config.realtts.toml
 data_real/
 data_m1/
 samples/
+config.audio.toml
+data_audio/
+data_mock2/
+config.mock2.toml

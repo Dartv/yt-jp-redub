@@ -72,13 +72,13 @@ class TelegramBot:
         for url in urls:
             vid, _ = self.worker.submit(url)
             caption = self._caption(vid)
+            chat = msg["chat"]["id"]
             try:
-                sent = await self.call("sendPhoto", chat_id=msg["chat"]["id"], parse_mode="HTML", caption=caption,
-                                       photo=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg")
-            except RuntimeError:
-                sent = await self.call("sendMessage", chat_id=msg["chat"]["id"], parse_mode="HTML", text=caption)
-            self.worker.db.add_notify(vid, msg["chat"]["id"], sent["message_id"])
-            self.worker.db.set_notify_text(vid, msg["chat"]["id"], sent["message_id"], caption)
+                sent, kind = await self.call("sendPhoto", chat_id=chat, parse_mode="HTML", caption=caption,
+                                             photo=f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg"), "photo"
+            except RuntimeError:  # thumbnail unavailable: plain text status instead
+                sent, kind = await self.call("sendMessage", chat_id=chat, parse_mode="HTML", text=caption), "text"
+            self.worker.db.add_notify(vid, chat, sent["message_id"], kind, caption)
 
     async def _edit_loop(self) -> None:
         while True:
@@ -97,15 +97,10 @@ class TelegramBot:
                 for n in self.worker.db.notifies(vid):
                     if n["last_text"] == caption:
                         continue
+                    method, field = ("editMessageCaption", "caption") if n["kind"] == "photo" else ("editMessageText", "text")
                     try:
-                        try:
-                            await self.call("editMessageCaption", chat_id=n["chat_id"], message_id=n["message_id"],
-                                            caption=caption, parse_mode="HTML")
-                        except RuntimeError as e:
-                            if "no caption" not in str(e).lower() and "there is no" not in str(e).lower():
-                                raise
-                            await self.call("editMessageText", chat_id=n["chat_id"], message_id=n["message_id"],
-                                            text=caption, parse_mode="HTML")
+                        await self.call(method, chat_id=n["chat_id"], message_id=n["message_id"],
+                                        parse_mode="HTML", **{field: caption})
                         self.worker.db.set_notify_text(vid, n["chat_id"], n["message_id"], caption)
                     except Exception as e:
                         log.warning("Telegram edit failed: %s", e)
