@@ -6,7 +6,7 @@ from ..models import Chunk, Line, LinesDoc, Word
 
 SENT_END = (".", "?", "!", "…")
 CLAUSE_END = (",", ";", ":", "—", "-")
-ABBREV = {"mr.", "mrs.", "ms.", "dr.", "st.", "vs.", "jr.", "sr.", "e.g.", "i.e.", "etc.", "prof.", "no."}
+ABBREV = {"mr.", "mrs.", "ms.", "dr.", "st.", "vs.", "jr.", "sr.", "e.g.", "i.e.", "etc.", "prof."}
 
 
 def words_to_lines(words: list[Word], max_chars: int = 90, max_sec: float = 7.0,

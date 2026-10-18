@@ -11,6 +11,7 @@ import re
 import socket
 import subprocess
 import sys
+import time
 
 EXCLUDE = re.compile(r"warp|cloudflare|tailscale|zerotier|wireguard|wg\d|tun|tap|utun|vethernet|hyper-v|"
                      r"virtualbox|vbox|vmware|vmnet|docker|br-|veth|wsl|loopback|npcap|hamachi|nordlynx|"
@@ -83,7 +84,20 @@ def _fallback() -> str | None:
         return None
 
 
-def lan_ip() -> str:
+_cache: tuple[float, str] | None = None
+
+
+def lan_ip(ttl: float = 60.0) -> str:
+    """Cached for a minute: links follow a changed IP without shelling out on every request."""
+    global _cache
+    if _cache and time.monotonic() - _cache[0] < ttl:
+        return _cache[1]
+    ip = _discover()
+    _cache = (time.monotonic(), ip)
+    return ip
+
+
+def _discover() -> str:
     if sys.platform == "win32":
         ifaces = _windows()
     elif sys.platform == "darwin":

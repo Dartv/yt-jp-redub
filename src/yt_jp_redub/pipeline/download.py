@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
+import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Callable
 
 import yt_dlp
 
 from ..models import VideoPaths, atomic_write_json
+
+log = logging.getLogger(__name__)
 
 
 def fetch_info(url: str, cookies_file: str = "") -> dict:
@@ -21,6 +25,20 @@ def fetch_info(url: str, cookies_file: str = "") -> dict:
 
 
 def download(url: str, paths: VideoPaths, max_height: int = 1080, cookies_file: str = "",
+             progress: Callable[[float], None] | None = None, attempts: int = 3) -> dict:
+    """Retries with freshly extracted URLs: YouTube intermittently answers 403 on media URLs."""
+    for i in range(attempts):
+        try:
+            return _download(url, paths, max_height, cookies_file, progress)
+        except yt_dlp.utils.DownloadError as e:
+            if i == attempts - 1 or "403" not in str(e):
+                raise
+            log.warning("download got HTTP 403, retrying (%d/%d)", i + 1, attempts - 1)
+            time.sleep(3 * (i + 1))
+    raise AssertionError
+
+
+def _download(url: str, paths: VideoPaths, max_height: int = 1080, cookies_file: str = "",
              progress: Callable[[float], None] | None = None) -> dict:
     """Downloads source.mp4 (video only) and source.m4a. Returns the info dict."""
     paths.root.mkdir(parents=True, exist_ok=True)

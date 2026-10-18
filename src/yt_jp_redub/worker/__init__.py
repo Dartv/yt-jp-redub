@@ -253,6 +253,16 @@ class Worker:
                 f.write(np.clip(v, -1, 1))
                 t += 120
 
+    def preload(self) -> None:
+        """Loads ASR, Demucs and IndexTTS up front so the first job doesn't wait for them."""
+        try:
+            asr.load(self.cfg.asr.model, self.cfg.asr.device)
+            self._get_separator()
+            self._get_tts()
+            log.info("Models loaded")
+        except Exception as e:
+            log.warning("Model preload failed (will retry when needed): %s", e)
+
     def _get_separator(self):
         if self._separator is None:
             from ..pipeline.separate import make_separator
@@ -280,17 +290,21 @@ class Worker:
         in_flight: set[int] = set()   # line ids being translated right now
 
         def next_batch() -> list | None:
-            """Contiguous untranslated lines, starting in the most urgent chunk that still has any."""
-            for c in self.sched.order(vid, len(doc.chunks)):
-                first = next((i for i in doc.chunks[c].line_ids
-                              if not doc.lines[i].ja and i not in in_flight), None)
-                if first is None:
+            """Untranslated lines of the most urgent chunk that still has any. Batches never cross
+            chunk boundaries, so each chunk becomes dubbable as soon as its own batch returns."""
+            order = self.sched.order(vid, len(doc.chunks))
+            head = set(order[:2])
+            for c in order:
+                todo = [i for i in doc.chunks[c].line_ids if not doc.lines[i].ja and i not in in_flight]
+                if not todo:
                     continue
-                batch, i = [], first
-                while (i < len(doc.lines) and len(batch) < tcfg.batch_lines
-                       and not doc.lines[i].ja and i not in in_flight):
+                # the chunks about to be watched go out in small batches: latency follows output length
+                size = min(tcfg.batch_lines, 12) if c in head else tcfg.batch_lines
+                batch = [doc.lines[todo[0]]]
+                for i in todo[1:size]:
+                    if i != batch[-1].id + 1:
+                        break
                     batch.append(doc.lines[i])
-                    i += 1
                 return batch
             return None
 
@@ -342,6 +356,7 @@ class Worker:
         paths = self.paths(vid)
         n = len(doc.chunks)
         started = False
+        waited_for, wait_since = None, 0.0
 
         def eligible(c: int) -> bool:
             return all(doc.lines[i].ja for i in doc.chunks[c].line_ids)
@@ -354,6 +369,15 @@ class Worker:
             if len(done) >= n:
                 return
             c = self.sched.next(vid, n, done, eligible)
+            urgent = self.sched.next(vid, n, done, lambda _: True)
+            if c is not None and c != urgent and not trans.done():
+                # the chunk at the playhead is still being translated: wait for it (up to 2 min)
+                # rather than tie up the GPU with a chunk far ahead
+                if waited_for != urgent:
+                    waited_for, wait_since = urgent, time.time()
+                if time.time() - wait_since < 120:
+                    await self.wait_change(2)
+                    continue
             if c is None:
                 if trans.done():
                     trans.result()  # re-raise a translation failure

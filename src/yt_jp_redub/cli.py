@@ -66,6 +66,8 @@ async def _serve(cfg) -> None:
           f"  Local:     http://127.0.0.1:{cfg.server.port}/\n"
           f"  asbplayer: ws://127.0.0.1:{cfg.server.ws_port}/ws\n", flush=True)
 
+    await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
+    asyncio.get_running_loop().run_in_executor(None, worker.preload)  # models load while you browse
     tasks = [asyncio.create_task(worker.run(), name="worker"),
              asyncio.create_task(_check_ytdlp(), name="yt-dlp check")]
     s = cfg.secrets

@@ -65,6 +65,17 @@ uv run yt-jp-redub process <url> -o video.mkv
 
 Writes an `.mkv` with Japanese and English audio and subtitles, with no server. It also prints how long each stage took.
 
+## Performance
+
+Measured on an RTX 5080 with Gemma 4 31B on AI Studio's free tier, 1-hour podcast:
+- download 20 s, ASR 30 s for the whole hour
+- dubbing ~0.55× real time per chunk (stays ahead of playback once started)
+- **playback can start after ~4–5 min**
+
+That start-up time is mostly translation: the free tier takes 60–100 s per batch and often answers HTTP 500, which is retried.
+A faster or local OpenAI-compatible model shortens it directly; lowering `head_start_sec` also starts sooner.
+The first job after `serve` starts doesn't wait for models: they load in the background at startup.
+
 ## asbplayer and Yomitan
 
 Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionary, and [asbplayer](https://github.com/killergerbah/asbplayer). Tested with asbplayer at commit `62c4d6e` (2026-10-15).

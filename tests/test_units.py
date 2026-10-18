@@ -37,6 +37,11 @@ def test_lines_split_on_sentences_and_pauses():
     assert [l.en for l in lines] == ["Yes, sir.", "I'd like an argument please.", "Mr. Smith is free"]
 
 
+def test_short_replies_are_own_lines():
+    lines = words_to_lines(_words("No, you didn't. Yes, I did. No. Yes."))
+    assert [l.en for l in lines] == ["No, you didn't.", "Yes, I did.", "No.", "Yes."]
+
+
 def test_long_line_splits():
     lines = words_to_lines(_words(" ".join(["word"] * 60)), max_chars=50, max_sec=100)
     assert all(len(l.en) <= 55 for l in lines)
