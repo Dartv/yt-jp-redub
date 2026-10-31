@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 ROOT = Path(__file__).resolve().parents[2]
 
 DEFAULTS: dict = {
-    "server": {"host": "0.0.0.0", "port": 8767, "ws_port": 8766, "public_host": ""},
+    "server": {"host": "0.0.0.0", "port": 8767, "ws_port": 8766, "public_host": "", "unload_after_min": 5},
     "storage": {"data_dir": "data", "cap_gb": 50},
     "download": {"max_height": 1080, "cookies_file": ""},
     "asr": {"model": "nemo-parakeet-tdt-0.6b-v2", "device": "cuda", "use_vocals": False},

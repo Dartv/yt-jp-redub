@@ -103,7 +103,7 @@ On an RTX 5080, a chunk dubs in about 0.6× its length, so once playback starts 
 
 How soon playback starts depends mostly on the translation API. With xAI's `grok-4.3`, four test videos started playing 24 to 38 s after the link was added. On Google AI Studio's free tier, an earlier version of this tool took 4 to 5 minutes, because the free tier allows 25 requests a minute and often answers HTTP 500, which is retried. Any faster OpenAI-compatible model, including a local one, starts sooner.
 
-The first job after `serve` starts doesn't wait for models: they load in the background at startup.
+`serve` holds no GPU memory until you add a video: the models load in the background while it downloads and is transcribed, and are freed again 5 minutes after the last video is dubbed (`unload_after_min` in `config.toml`; 0 keeps them loaded).
 
 ## asbplayer and Yomitan
 

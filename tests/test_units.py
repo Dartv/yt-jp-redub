@@ -137,6 +137,29 @@ def test_speakable_reads_huge_numbers_digit_by_digit():
     assert speakable("12345678901234567") == "一二三四五六七八九〇一二三四五六七"
 
 
+def test_models_unload_once_after_idle(tmp_path):
+    import asyncio
+    from types import SimpleNamespace
+
+    from yt_jp_redub.config import DEFAULTS, Config, _merge, _ns
+    from yt_jp_redub.db import DB
+    from yt_jp_redub.worker import Worker
+
+    data = _merge(DEFAULTS, {"storage": {"data_dir": str(tmp_path)}, "server": {"unload_after_min": 0.005}})
+    cfg = Config(**{k: _ns(v) for k, v in data.items()})
+    w = Worker(cfg, DB(cfg.db_path))
+    unloads = []
+    w.models = SimpleNamespace(loaded=lambda: not unloads, unload=lambda: unloads.append(1))
+
+    async def idle_for(sec):
+        task = asyncio.create_task(w.run())
+        await asyncio.sleep(sec)
+        task.cancel()
+
+    asyncio.run(idle_for(1.5))
+    assert unloads == [1]  # after 0.3 s with nothing queued; then it waits without a timeout
+
+
 def test_error_hints():
     assert error_hint(None) is None
     what, fix = error_hint("ERROR: [youtube] x: Sign in to confirm you're not a bot")

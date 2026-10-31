@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gc
 import json
 import logging
 import math
 import shutil
+import sys
 import time
 from collections import defaultdict
 from collections.abc import Callable
@@ -35,7 +37,8 @@ Listener = Callable[[str], None]
 
 
 class Models:
-    """The heavy backends, loaded on first use (or up front by preload) and kept for the process."""
+    """The heavy backends: loaded when a video starts (preload) or on first use, and freed by
+    unload once nothing has needed them for a while."""
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
@@ -59,13 +62,27 @@ class Models:
         return make_translator(self.cfg)
 
     def preload(self) -> None:
-        """Loads ASR, Demucs and IndexTTS so the first job doesn't wait for them."""
+        """Loads ASR, Demucs and IndexTTS while a video downloads, so dubbing doesn't wait for them."""
         try:
             asr.load(self.cfg.asr.model, self.cfg.asr.device)
             self.separator, self.tts  # noqa: B018 (touching the properties loads them)
             log.info("Models loaded")
         except Exception as e:
             log.warning("Model preload failed (will retry when needed): %s", e)
+
+    def loaded(self) -> bool:
+        return "separator" in self.__dict__ or "tts" in self.__dict__ or asr.loaded()
+
+    def unload(self) -> None:
+        """Frees the GPU and memory they hold; the IndexTTS process exits."""
+        if "tts" in self.__dict__:
+            self.__dict__.pop("tts").close()
+        self.__dict__.pop("separator", None)
+        asr.unload()
+        gc.collect()
+        if "torch" in sys.modules:  # Demucs' memory goes back to the GPU, not just to torch's cache
+            sys.modules["torch"].cuda.empty_cache()
+        log.info("Models unloaded (idle)")
 
     async def close(self) -> None:
         if "translator" in self.__dict__:
@@ -91,6 +108,7 @@ class Worker:
         self._disk_docs: dict[str, tuple[float, LinesDoc]] = {}
         self._offline_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
         self._tasks: set[asyncio.Task] = set()  # background work, referenced until done
+        self._preload: asyncio.Future | None = None
 
     # ------------------------------------------------------------------ queries
     def paths(self, video_id: str) -> VideoPaths:
@@ -227,13 +245,21 @@ class Worker:
                 [v for v in done if self.status(v)["ready"] and not self.paths(v).dub_audio.exists()]
             )
         )
+        idle = self.cfg.server.unload_after_min * 60
         while True:
             pending = self.db.pending_jobs()
             if not pending:
                 self._wake.clear()
-                await self._wake.wait()
+                try:
+                    await asyncio.wait_for(self._wake.wait(), idle if idle and self.models.loaded() else None)
+                except TimeoutError:
+                    if self._preload:  # a load still under way would come back after the unload
+                        await self._preload
+                    await asyncio.to_thread(self.models.unload)
                 continue
             vid = self.current = pending[0]["video_id"]
+            # the models load while the video downloads and is transcribed
+            self._preload = asyncio.get_running_loop().run_in_executor(None, self.models.preload)
             try:
                 await self.process(vid)
                 self.cleanup(self.paths(vid))

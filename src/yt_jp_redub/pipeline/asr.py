@@ -67,6 +67,15 @@ def load(model_name: str, device: str):
         return _MODEL_CACHE[key]
 
 
+def loaded() -> bool:
+    return bool(_MODEL_CACHE)
+
+
+def unload() -> None:
+    with _load_lock:
+        _MODEL_CACHE.clear()
+
+
 def tokens_to_words(tokens: list[str], stamps: list[float], seg_start: float, seg_end: float) -> list[Word]:
     """Merges subword tokens into words. A token starting with a space (or ▁) starts a new word."""
     words: list[Word] = []

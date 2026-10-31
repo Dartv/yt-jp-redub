@@ -87,7 +87,6 @@ async def _serve(cfg) -> None:
 
     await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, worker.models.preload)  # models load while you browse
     loop.run_in_executor(None, _update_ytdlp)  # YouTube breaks old versions often
     try:
         await worker.run()
