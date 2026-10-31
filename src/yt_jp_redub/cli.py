@@ -43,7 +43,7 @@ def _logging(verbose: bool) -> None:
 
 
 # ---------------------------------------------------------------------------- serve
-async def _serve(cfg) -> None:
+async def _serve(cfg, open_browser: bool = False) -> None:
     from aiohttp import web
 
     from .db import DB
@@ -84,8 +84,12 @@ async def _serve(cfg) -> None:
     )
     if not base.startswith("http://127.0.0.1"):
         _print_qr(base)
+    if open_browser:
+        webbrowser.open(f"http://127.0.0.1:{cfg.server.port}/")
 
     await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
+    if await asyncio.to_thread(lambda: worker.models.low_vram):
+        log.info("Low-VRAM mode: transcription's and the dub's models take turns on the GPU")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, _update_ytdlp)  # YouTube breaks old versions often
     try:
@@ -261,7 +265,8 @@ def _setup(cfg, skip_tts: bool) -> int:
         print("  macOS asks the first time the server starts; click Allow.")
     else:
         print(f"  sudo ufw allow {port}/tcp   (only if ufw is enabled)")
-    print("\nDone. Start the server with:  uv run yt-jp-redub serve")
+    launcher = "start.bat" if os.name == "nt" else "./start.sh"
+    print(f"\nDone. Start it with {launcher} (or: uv run yt-jp-redub serve)")
     return 0
 
 
@@ -272,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd", required=True)
     p_serve = sub.add_parser("serve", help="run the server (player, library and worker)")
+    p_serve.add_argument("--open", action="store_true", help="open the library in the browser")
     p_add = sub.add_parser("add", help="queue a video on the running server")
     p_add.add_argument("url")
     p_add.add_argument("--no-open", action="store_true", help="don't open the player in the browser")
@@ -298,7 +304,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.cmd == "serve":
         with contextlib.suppress(KeyboardInterrupt):
-            asyncio.run(_serve(cfg))
+            asyncio.run(_serve(cfg, args.open))
         return 0
     if args.cmd == "add":
         return _add(cfg, args.url, not args.no_open)

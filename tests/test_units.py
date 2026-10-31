@@ -160,6 +160,25 @@ def test_models_unload_once_after_idle(tmp_path):
     assert unloads == [1]  # after 0.3 s with nothing queued; then it waits without a timeout
 
 
+def test_low_vram_stages_take_turns(monkeypatch):
+    from yt_jp_redub.config import DEFAULTS, Config, _merge, _ns
+    from yt_jp_redub.worker import Models, asr
+
+    data = _merge(DEFAULTS, {"separate": {"backend": "mock"}, "tts": {"backend": "mock"}})
+    data["server"]["low_vram"] = True
+    m = Models(Config(**{k: _ns(v) for k, v in data.items()}))
+    on_gpu = set()
+    monkeypatch.setattr(asr, "load", lambda *a: on_gpu.add("asr"))
+    monkeypatch.setattr(asr, "unload", lambda: on_gpu.discard("asr"))
+    assert m.low_vram
+    m.preload("asr")
+    assert on_gpu == {"asr"} and not {"tts", "separator"} & m.__dict__.keys()
+    m.preload("dub")
+    assert not on_gpu and {"tts", "separator"} <= m.__dict__.keys()
+    m.preload("asr")
+    assert on_gpu == {"asr"} and "tts" not in m.__dict__
+
+
 def test_error_hints():
     assert error_hint(None) is None
     what, fix = error_hint("ERROR: [youtube] x: Sign in to confirm you're not a bot")

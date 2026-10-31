@@ -4,6 +4,27 @@
 set -eu
 cd "$(dirname "$0")"
 
+free=$(df -Pk . | awk 'NR == 2 { print int($4 / 1048576) }')
+cat <<EOF
+yt-jp-redub installs into $(pwd)
+  - git, ffmpeg and uv, if they're missing
+  - two Python environments with PyTorch (~16 GB)
+  - IndexTTS-2.5 and the speech recognition and separation models (~13 GB)
+It needs about 30 GB of disk${free:+; this drive has $free GB free}.
+uv also keeps a download cache in your home folder ('uv cache clean' frees it afterwards).
+EOF
+if [ -n "$free" ] && [ "$free" -lt 30 ]; then
+  echo "That isn't enough: free some space or move this folder first."
+fi
+if [ -t 0 ]; then  # asked only when someone is at the terminal
+  printf "Continue? [Y/n] "
+  read -r answer
+  case "$answer" in
+    "" | [Yy] | [Yy][Ee][Ss]) ;;
+    *) echo "Nothing was installed."; exit 1 ;;
+  esac
+fi
+
 missing=""
 for tool in git ffmpeg; do
   command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"

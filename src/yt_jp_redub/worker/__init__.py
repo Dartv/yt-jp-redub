@@ -13,6 +13,7 @@ import json
 import logging
 import math
 import shutil
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -34,6 +35,23 @@ from .translation import translate_video
 
 log = logging.getLogger(__name__)
 Listener = Callable[[str], None]
+# all the models at once take ~10 GB (ASR 3.6, IndexTTS 4.9, Demucs 1.3) plus what the desktop uses
+LOW_VRAM_MIB = 14000
+
+
+def gpu_memory_mib() -> int | None:
+    """The smallest NVIDIA GPU's memory; None without one (Macs, CPU only)."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=True,
+        ).stdout
+        return min(int(x) for x in out.split())
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
 
 
 class Models:
@@ -61,28 +79,45 @@ class Models:
 
         return make_translator(self.cfg)
 
-    def preload(self) -> None:
-        """Loads ASR, Demucs and IndexTTS while a video downloads, so dubbing doesn't wait for them."""
+    @cached_property
+    def low_vram(self) -> bool:
+        """A GPU too small for every model at once: transcription's (ASR) and the dub's (Demucs,
+        IndexTTS) then take turns."""
+        if self.cfg.server.low_vram != "auto":
+            return str(self.cfg.server.low_vram).lower() == "true"
+        mib = gpu_memory_mib()
+        return mib is not None and mib < LOW_VRAM_MIB
+
+    def preload(self, only: str | None = None) -> None:
+        """Loads ASR, Demucs and IndexTTS while a video downloads, so the stages don't wait for them.
+        With only="asr" or "dub" (low VRAM) it loads just that stage's, after freeing the other's."""
         try:
-            asr.load(self.cfg.asr.model, self.cfg.asr.device)
-            self.separator, self.tts  # noqa: B018 (touching the properties loads them)
-            log.info("Models loaded")
+            if only:
+                self.unload("dub" if only == "asr" else "asr")
+            if only != "dub":
+                asr.load(self.cfg.asr.model, self.cfg.asr.device)
+            if only != "asr":
+                self.separator, self.tts  # noqa: B018 (touching the properties loads them)
+            log.info("Models loaded%s", f" ({only})" if only else "")
         except Exception as e:
             log.warning("Model preload failed (will retry when needed): %s", e)
 
     def loaded(self) -> bool:
         return "separator" in self.__dict__ or "tts" in self.__dict__ or asr.loaded()
 
-    def unload(self) -> None:
-        """Frees the GPU and memory they hold; the IndexTTS process exits."""
-        if "tts" in self.__dict__:
-            self.__dict__.pop("tts").close()
-        self.__dict__.pop("separator", None)
-        asr.unload()
+    def unload(self, stage: str | None = None) -> None:
+        """Frees the GPU and memory they hold (only one stage's, "asr" or "dub", with stage=); the
+        IndexTTS process exits."""
+        if stage != "asr":
+            if "tts" in self.__dict__:
+                self.__dict__.pop("tts").close()
+            self.__dict__.pop("separator", None)
+        if stage != "dub":
+            asr.unload()
         gc.collect()
         if "torch" in sys.modules:  # Demucs' memory goes back to the GPU, not just to torch's cache
             sys.modules["torch"].cuda.empty_cache()
-        log.info("Models unloaded (idle)")
+        log.info("Models unloaded%s", f" ({stage})" if stage else "")
 
     async def close(self) -> None:
         if "translator" in self.__dict__:
@@ -259,7 +294,10 @@ class Worker:
                 continue
             vid = self.current = pending[0]["video_id"]
             # the models load while the video downloads and is transcribed
-            self._preload = asyncio.get_running_loop().run_in_executor(None, self.models.preload)
+            only = None
+            if self.models.low_vram:  # only the next stage's (the dub's follow in process)
+                only = "dub" if self.paths(vid).transcript.exists() else "asr"
+            self._preload = asyncio.get_running_loop().run_in_executor(None, self.models.preload, only)
             try:
                 await self.process(vid)
                 self.cleanup(self.paths(vid))
@@ -283,6 +321,12 @@ class Worker:
             stale.unlink(missing_ok=True)
         await self._download(vid, paths)
         doc = await self._transcribe(vid, paths)
+        if (
+            self.models.low_vram
+        ):  # ASR makes way for the dub's models, which load as the first lines translate
+            if self._preload:
+                await self._preload
+            self._preload = asyncio.get_running_loop().run_in_executor(None, self.models.preload, "dub")
         self._docs[vid] = doc
         try:
             self.db.set_chunks(vid, [(c.id, c.start, c.end) for c in doc.chunks])

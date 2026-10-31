@@ -4,6 +4,22 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
+try { $free = [math]::Floor((Get-Item .).PSDrive.Free / 1GB) } catch { $free = $null }
+Write-Host @"
+yt-jp-redub installs into $PWD
+  - git, ffmpeg and uv, if they're missing
+  - two Python environments with PyTorch (~16 GB)
+  - IndexTTS-2.5 and the speech recognition and separation models (~13 GB)
+It needs about 30 GB of disk$(if ($null -ne $free) { "; this drive has $free GB free" }).
+uv also keeps a download cache in your user folder ('uv cache clean' frees it afterwards).
+"@
+if ($null -ne $free -and $free -lt 30) { Write-Host "That isn't enough: free some space or move this folder first." }
+$answer = Read-Host "Continue? [Y/n]"
+if ($answer -and $answer -notmatch '^(y|yes)$') {
+  Write-Host "Nothing was installed."
+  exit 1
+}
+
 function Refresh-Path {
   $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" +
     [Environment]::GetEnvironmentVariable("Path", "User")

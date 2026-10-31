@@ -46,7 +46,9 @@ class DemucsSeparator:
                 overlap=0.25,
                 progress=False,
             )[0]
-        out = (out * std + mean).cpu().numpy()  # (sources, channels, frames)
+            out = (out * std + mean).cpu().numpy()  # (sources, channels, frames)
+            if self.device.startswith("cuda"):  # its ~0.8 GB of scratch memory goes to IndexTTS until the next chunk
+                torch.cuda.empty_cache()
         vocals = out[self.vocals_idx].T
         background = out.sum(0).T - vocals
         vocals, background = resample(vocals, self.sr, sr), resample(background, self.sr, sr)

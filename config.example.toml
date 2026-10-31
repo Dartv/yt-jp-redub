@@ -8,6 +8,8 @@ ws_port = 8766            # asbplayer WebSocket client connects here (PC only)
 public_host = ""          # override the auto-discovered LAN IP used in links
 unload_after_min = 5      # free the GPU this many minutes after the last video is dubbed; 0 keeps the
                           # models loaded (they load again, in the background, when a video starts)
+low_vram = "auto"         # true: transcription's and the dub's models take turns on the GPU (needs ~6 GB;
+                          # a video starts a few seconds later). "auto": on below 14 GB of video memory
 
 [storage]
 data_dir = "data"

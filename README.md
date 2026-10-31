@@ -10,14 +10,22 @@ Dub YouTube videos, Twitch VODs and Twitch clips into Japanese, so you can pract
 
 ## Requirements
 
-- An NVIDIA GPU with about 10 GB of VRAM or more (developed on an RTX 5080 16 GB). Apple Silicon should work, more slowly, and is community-tested.
+- An NVIDIA GPU with 8 GB of VRAM or more (developed on an RTX 5080 16 GB). Apple Silicon should work, more slowly, and is community-tested.
 - Windows, Linux or macOS.
-- About 15 GB of disk for models and environments, plus space for videos (capped at 50 GB by default).
+- About 30 GB of disk for models and environments, plus space for videos (capped at 50 GB by default).
 - Optional: [Deno](https://deno.com/) on your PATH makes YouTube downloads more reliable (yt-dlp uses it to solve YouTube's JavaScript challenges).
 
 ## Install
 
-Download or clone this repository, open a terminal in its folder and run the installer for your system.
+Download or clone this repository, then start it:
+
+- Windows: double-click `start.bat`.
+- macOS: double-click `start.command`. If macOS refuses to open it, right-click it and choose Open.
+- Linux: run `./start.sh` in a terminal.
+
+The first time, it says what it will install and how much space that takes (about 30 GB), asks before going ahead, installs everything (below), then starts the server and opens the library in your browser. After that it just starts.
+
+To install without starting, run the installer for your system in a terminal in the repository's folder.
 
 Windows (PowerShell):
 
@@ -43,11 +51,9 @@ If you'd rather install `git`, `ffmpeg` and `uv` yourself, run `uv run yt-jp-red
 
 ## Run
 
-```bash
-uv run yt-jp-redub serve
-```
+Double-click `start.bat` or `start.command`, or run `./start.sh`. From a terminal, `uv run yt-jp-redub serve` does the same without opening the browser (add `--open` for that).
 
-It prints the library address, for example `http://192.168.1.20:8767/`, and a QR code of it. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
+The server prints the library address, for example `http://192.168.1.20:8767/`, and a QR code of it. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
 
 On your phone, join the same Wi-Fi and point the camera at the QR code (in the terminal, or at the top right of the library page on the PC). Add the page to your home screen to open it in one tap next time.
 
@@ -104,6 +110,8 @@ On an RTX 5080, a chunk dubs in about 0.6× its length, so once playback starts 
 How soon playback starts depends mostly on the translation API. With xAI's `grok-4.3`, four test videos started playing 24 to 38 s after the link was added. On Google AI Studio's free tier, an earlier version of this tool took 4 to 5 minutes, because the free tier allows 25 requests a minute and often answers HTTP 500, which is retried. Any faster OpenAI-compatible model, including a local one, starts sooner.
 
 `serve` holds no GPU memory until you add a video: the models load in the background while it downloads and is transcribed, and are freed again 5 minutes after the last video is dubbed (`unload_after_min` in `config.toml`; 0 keeps them loaded).
+
+All the models together need about 11 GB of VRAM. On a GPU with less than 14 GB, the speech recognizer and the dub's models (Demucs and IndexTTS) take turns instead, so the dub fits in about 6 GB alongside the desktop. Playback then starts a few seconds later: with a 12-minute test video, the first chunk was ready after 36 s instead of 29 s. `low_vram` in `config.toml` turns this on or off regardless of the GPU.
 
 ## asbplayer and Yomitan
 
