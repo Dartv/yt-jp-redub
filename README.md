@@ -53,7 +53,7 @@ On your phone, join the same Wi-Fi and point the camera at the QR code (in the t
 
 ### Adding videos
 
-- Library page: paste a link into the box and dubbing starts right away. On the PC, the clipboard button next to it dubs the link you copied in one click. A phone's browser won't let the page read the clipboard over plain HTTP, so there the button opens the box instead, and the keyboard's suggestion bar offers the copied link: tap it.
+- Library page: paste a link into the box and dubbing starts right away. On the PC, the clipboard button next to it dubs the link you copied in one click. On a phone, tap the box: the keyboard's suggestion bar offers the link you copied, and tapping it starts the dub (so does long-pressing the box and choosing Paste). Phone browsers don't let the page read the clipboard over plain HTTP, so the phone page has no clipboard button.
 - Bookmarklet (PC): drag "Dub this" from the library's "Other ways to add videos" to your bookmarks bar, then click it on any YouTube video or Twitch VOD or clip page.
 - Command line: `uv run yt-jp-redub add <url>` queues the video on the running server and opens the player.
 

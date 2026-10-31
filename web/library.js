@@ -105,10 +105,20 @@ urlInput.addEventListener("paste", (e) => {
   urlInput.value = text;
   dub(text);
 });
-// the paste button reads the clipboard where the browser allows it (HTTPS or this PC). Over the
-// network's plain http a page can't, so it opens the box instead: the phone keyboard offers the
-// copied link as a suggestion, and tapping it dubs the video.
-document.getElementById("paste").addEventListener("click", async () => {
+// so does a link inserted in one go some other way: the phone keyboard's suggestion of the copied
+// link, or autofill (typing grows the box a character or a word at a time)
+let lastLen = 0;
+urlInput.addEventListener("input", () => {
+  const grew = urlInput.value.length - lastLen,
+    text = urlInput.value.trim();
+  lastLen = urlInput.value.length;
+  if (grew >= 10 && VIDEO_LINK.test(text)) dub(text);
+});
+// the paste button reads the clipboard, which browsers allow only over HTTPS or on this PC; over
+// the network's plain http it couldn't do anything, so it isn't shown
+const paste = document.getElementById("paste");
+paste.hidden = !navigator.clipboard?.readText;
+paste.addEventListener("click", async () => {
   try {
     const text = (await navigator.clipboard.readText()).trim();
     if (VIDEO_LINK.test(text)) {
