@@ -1,16 +1,16 @@
 # yt-jp-redub
 
-Dub YouTube videos, Twitch VODs and Twitch clips into Japanese, so you can practise listening with the Western content you already watch.
+Dub YouTube videos, Twitch VODs and Twitch clips into Japanese, so you can practise listening with the content you already watch.
 
 - Each speaker keeps their own voice and tone. [IndexTTS-2.5](https://github.com/index-tts/index-tts) voices every line, using that speaker's original audio as the reference.
 - Japanese and English subtitles that [Yomitan](https://github.com/yomidevs/yomitan) can scan and [asbplayer](https://github.com/killergerbah/asbplayer) can load.
 - It streams. Playback starts as soon as the dub can stay ahead of you, usually within a minute with a fast translation API, and seeking ahead moves the dub to where you are.
-- Everything except translation runs on your PC. Translation goes through any OpenAI-compatible API; the default is Gemma on Google AI Studio's free tier.
+- Translation goes through any OpenAI-compatible API;
 - Watch on the PC, or on your phone over the same Wi-Fi.
 
 ## Requirements
 
-- An NVIDIA GPU with 8 GB of VRAM or more (developed on an RTX 5080 16 GB). Apple Silicon should work, more slowly, and is community-tested.
+- An NVIDIA GPU with 8 GB of VRAM or more (tested on an RTX 5080 16 GB). Apple Silicon should work.
 - Windows, Linux or macOS.
 - About 30 GB of disk for models and environments, plus space for videos (capped at 50 GB by default).
 - Optional: [Deno](https://deno.com/) on your PATH makes YouTube downloads more reliable (yt-dlp uses it to solve YouTube's JavaScript challenges).
@@ -67,29 +67,11 @@ Twitch VODs (`twitch.tv/videos/…`) and clips work; live streams don't. Twitch 
 
 Videos are dubbed one at a time, in the order you add them, with no length limit. Adding a link that is already done or in progress opens it again.
 
-### Watching
-
-While the first part is being dubbed, the player shows what it's doing and how long until it can start ("ready in ~20 s"), then starts by itself as soon as the part it starts from is dubbed. If playback catches up with the dub, it pauses with the same countdown and resumes on its own.
-
-- Voice (talking-head icon): 日本語 or EN switches the spoken language.
-- Subtitles (captions icon): JA and EN switch each language's subtitles on or off. They're plain page text, so Yomitan can scan them. With a mouse, pointing at a subtitle pauses so you can look words up, and moving off it resumes; clicking or tapping a subtitle pauses until you press play.
-- Fullscreen puts the subtitles over the picture. On a phone, turning it sideways does the same. In portrait the video sits at the top, large subtitles right under it, and the controls at the bottom within thumb reach.
-- Volume (PC): the speaker button mutes, and hovering it opens a slider. Phones use their volume buttons.
-- The gear holds playback speed (0.5× to 1.5×) and subtitle size. These and the volume are remembered on that device.
-- The lighter part of the seek bar is what's already dubbed. In the library, a red line under a thumbnail shows how far you've watched.
-- Keyboard: space plays and pauses, ← and → jump to the previous or next subtitle and ↓ to the start of the current one (as in asbplayer), `a` and `d` skip 5 s, `<` and `>` change the speed, `m` mutes, `f` toggles fullscreen.
-- Touch: tap the picture to pause or play (in fullscreen, when the controls are hidden, the first tap brings them up). Double-tap the left or right side to skip 5 s; swipe right for the next subtitle, left for the previous one.
-- The player remembers where you stopped (on the server, so it carries over between PC and phone) and resumes there. The title links to the original video at the current time.
-- If a video fails, the player says why and what to do about it (for example when YouTube asks to confirm you're not a bot), with a Retry button and the full error under "Details". The library card shows the same reason.
-- If audio switching misbehaves on a device, open the player with `?mode=variants`; switching then reloads at the current time.
-
 ### Offline
 
 Once a video is fully dubbed, Download (top right in the player, ⤓ on a library card) saves it to watch without the server, for example on a phone. You get three files named after the video:
 - `… [JA dub].mp4`: Japanese (default) and English audio, Japanese and English subtitles.
 - `… [JA dub].ja.srt` and `… [JA dub].en.srt`: the subtitles as separate files, for players such as asbplayer.
-
-All three start at once. The first time, the browser may ask whether the page may download several files: allow it. When a dub finishes, its Japanese track is joined into one audio file (`dub.m4a`, about 90 MB per hour of video), so a download only packages existing streams and takes a second or two.
 
 To watch on a phone:
 - VLC: open the `.mp4`. It shows both audio tracks and both subtitle tracks. Many built-in gallery players show only the Japanese audio and no subtitles.
@@ -102,33 +84,6 @@ uv run yt-jp-redub process <url> -o video.mkv
 ```
 
 This writes an `.mkv` with Japanese and English audio and subtitles, with no server, and prints how long each stage took.
-
-## Performance
-
-On an RTX 5080, a chunk dubs in about 0.6× its length, so once playback starts it stays ahead. Download and speech recognition take under a minute even for an hour-long video.
-
-How soon playback starts depends mostly on the translation API. With xAI's `grok-4.3`, four test videos started playing 24 to 38 s after the link was added. On Google AI Studio's free tier, an earlier version of this tool took 4 to 5 minutes, because the free tier allows 25 requests a minute and often answers HTTP 500, which is retried. Any faster OpenAI-compatible model, including a local one, starts sooner.
-
-`serve` holds no GPU memory until you add a video: the models load in the background while it downloads and is transcribed, and are freed again 5 minutes after the last video is dubbed (`unload_after_min` in `config.toml`; 0 keeps them loaded).
-
-All the models together need about 11 GB of VRAM. On a GPU with less than 14 GB, the speech recognizer and the dub's models (Demucs and IndexTTS) take turns instead, so the dub fits in about 6 GB alongside the desktop. Playback then starts a few seconds later: with a 12-minute test video, the first chunk was ready after 36 s instead of 29 s. `low_vram` in `config.toml` turns this on or off regardless of the GPU.
-
-## asbplayer and Yomitan
-
-Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionary, and [asbplayer](https://github.com/killergerbah/asbplayer). Tested with asbplayer at commit `62c4d6e` (2026-10-15).
-
-- PC: in asbplayer's settings under Misc, enable the WebSocket client with `ws://127.0.0.1:8766/ws`. When a video's subtitles are complete and its player page is open, they load into asbplayer automatically; "Send subtitles to asbplayer" under the video sends them again.
-- Android (Firefox): asbplayer's WebSocket client isn't available there. Once subtitles are complete, open the asbplayer extension on the player page and pick the 日本語 or English track. The page offers them through `<track>` elements and asbplayer's page protocol. That protocol is undocumented, so the player's own subtitles are the fallback.
-
-## Configuration
-
-The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only. Until an API key is set, the library opens them by itself with a short setup guide.
-
-`config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment, and saving from the library keeps the comments. It holds your API key, so don't share it.
-
-To use another translation provider, set `base_url`, `model` and `api_key` under `[llm]` for any OpenAI-compatible endpoint, including local ones like Ollama or LM Studio. Set `system_prompt = true` if the model accepts system prompts (Gemma on AI Studio doesn't).
-
-Rate limits are set for you on Google AI Studio's free tier and on xAI; for other providers, set `rpm` and `tpm` under `[translate]` if they enforce limits (HTTP 429 answers are retried either way). Thinking models are asked for no reasoning (`reasoning_effort = "none"`), which answered 4 to 10 times faster than "low" and translated as well in a blind comparison.
 
 ## How it works
 
@@ -147,10 +102,6 @@ URL ─► yt-dlp ─► Parakeet ASR ─► segment ─► translate (whole vid
 - yt-dlp: the official binary lives in `bin/`. It updates itself at most once a day, and immediately whenever a download fails, since YouTube changes break old versions often.
 - State: job and chunk state live in SQLite (`data/db.sqlite`), so a restart resumes where it left off.
 
-## Security
-
-There is no authentication. Anyone on your network can open the player and add videos. On shared networks (dorms, cafés), set `host = "127.0.0.1"` in `config.toml` to limit access to this PC. Other websites can't read the library through your browser, and the asbplayer port only listens on this PC.
-
 ## Development
 
 ```bash
@@ -159,21 +110,6 @@ uv run pytest
 uv run ruff format && uv run ruff check   # Python formatting and lint
 npm install && npm run fmt           # web player formatting with oxfmt (needs Node 24+)
 uv run yt-jp-redub serve --mock      # mock translation/separation/TTS, no GPU or API key needed
-```
-
-Code layout:
-
-```
-src/yt_jp_redub/
-  cli.py              setup | serve | add | process
-  config.py, db.py, models.py, net.py
-  pipeline/           one module per stage: download (+ytdlp), asr, segment, translate,
-                      separate, speaker, pace, speakable, tts, dub, hls, subs, export
-  worker/             job queue, translation and dubbing loops, chunk scheduler, ETAs, status, storage cap
-  server/             HTTP API + HLS endpoints, library cards for htmx, asbplayer WebSocket bridge
-  tts_worker/         IndexTTS process (runs in IndexTTS's own environment)
-web/                  library (htmx) and player (plain HTML/CSS/JS, no build step; hls.js and htmx vendored)
-  player/             the player as ES modules, one job each; main.js wires them together
 ```
 
 ## Licenses and disclaimer
