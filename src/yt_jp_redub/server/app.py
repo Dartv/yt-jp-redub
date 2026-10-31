@@ -91,7 +91,6 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
                 "base_url": b,
                 "ws_port": cfg.server.ws_port,
                 "bookmarklet": f"javascript:location.href='{b}/add?url='+encodeURIComponent(location.href)",
-                "head_start_sec": cfg.stream.head_start_sec,
             }
         )
 

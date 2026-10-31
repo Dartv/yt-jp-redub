@@ -65,7 +65,6 @@ emo_alpha = 1.0
 num_beams = 1             # IndexTTS search width: 1 is ~20% faster than 3 with the same intelligibility
 
 [stream]
-head_start_sec = 120      # playback starts once this much is dubbed, or sooner if the dub will keep ahead
 lookahead_chunks = 3      # chunks after the playhead that always go first
 hold_sec = 20             # how long a not-yet-dubbed segment request is held before 503
 video_segment_sec = 6

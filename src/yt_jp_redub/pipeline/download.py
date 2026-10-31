@@ -1,4 +1,4 @@
-"""Download: H.264 video + AAC audio through the managed yt-dlp binary, re-encoded only if HEVC."""
+"""Download: AAC audio first, then H.264 video, through the managed yt-dlp binary; HEVC is re-encoded."""
 
 from __future__ import annotations
 
@@ -24,8 +24,10 @@ def download(
     max_height: int = 1080,
     cookies_file: str = "",
     progress: Callable[[float], None] | None = None,
+    part: str = "audio",
 ) -> dict:
-    """Downloads source.mp4 (video only), source.m4a and thumb.jpg; returns slim video info.
+    """part="audio": thumb.jpg, source.m4a and info.json, all that transcription and the dub need,
+    so they can start while part="video" downloads source.mp4 (video only). Returns slim video info.
 
     Works for any site yt-dlp supports; the app accepts YouTube and Twitch VODs/clips.
     YouTube breaks yt-dlp regularly, so a failure forces a yt-dlp update and one more try;
@@ -35,7 +37,7 @@ def download(
     updated = False
     for attempt in range(4):
         try:
-            return _download(url, paths, max_height, cookies_file, progress)
+            return _download(url, paths, max_height, cookies_file, progress, part)
         except DownloadError as e:
             if not updated:
                 log.warning(
@@ -52,7 +54,12 @@ def download(
 
 
 def _download(
-    url: str, paths: VideoPaths, max_height: int, cookies_file: str, progress: Callable[[float], None] | None
+    url: str,
+    paths: VideoPaths,
+    max_height: int,
+    cookies_file: str,
+    progress: Callable[[float], None] | None,
+    part: str,
 ) -> dict:
     paths.root.mkdir(parents=True, exist_ok=True)
     tmp = paths.root / "dl"
@@ -73,15 +80,6 @@ def _download(
             "was_live",
         )
     }
-    # before the media, so the library card has a picture during a long download; card-sized:
-    # YouTube's mqdefault, and Twitch's CDN serves any "-<w>x<h>.jpg" size
-    if not paths.thumb.exists():
-        if meta.get("extractor_key") == "Youtube":
-            _thumbnail(f"https://i.ytimg.com/vi/{slim['id']}/mqdefault.jpg", paths.thumb)
-        elif thumb := slim["thumbnail"]:
-            _thumbnail(re.sub(r"-\d+x\d+\.jpg$", "-320x180.jpg", thumb), paths.thumb)
-            if not paths.thumb.exists():
-                _thumbnail(thumb, paths.thumb)
 
     def fetch(fmt: str, name: str, target: Path, lo: float, hi: float) -> None:
         if target.exists():
@@ -120,26 +118,47 @@ def _download(
             raise DownloadError(f"yt-dlp produced no {name} file")
         shutil.move(files[0], target)
 
-    # Twitch streams run for hours at 60 fps: 1080p would be ~3.7 GB an hour, 720p roughly half
-    if str(meta.get("extractor_key", "")).startswith("Twitch"):
-        max_height = min(max_height, 720)
-    # prefer H.264 + AAC so browsers can play the HLS stream through MSE (video is ~90% of the bytes)
-    fetch(
-        f"bv*[vcodec^=avc1][height<={max_height}][ext=mp4]/bv*[vcodec^=avc1][height<={max_height}]/"
-        f"bv*[height<={max_height}][ext=mp4]",
-        "video",
-        paths.video,
-        0.0,
-        0.9,
-    )
-    if not paths.audio.exists() and _has_audio(paths.video):
-        # Twitch muxes the audio into every video format: take it from there instead of downloading again
-        part = tmp / "audio.m4a"
-        ff.run_ffmpeg(["-i", str(paths.video), "-map", "0:a:0", "-c", "copy", str(part)])
-        shutil.move(part, paths.audio)
-    fetch("ba[ext=m4a]/ba[acodec^=mp4a]/ba", "audio", paths.audio, 0.9, 1.0)
-    _no_hevc(paths.video, tmp)
-    shutil.rmtree(tmp, ignore_errors=True)
+    def video() -> None:
+        # Twitch streams run for hours at 60 fps: 1080p would be ~3.7 GB an hour, 720p roughly half
+        twitch = str(meta.get("extractor_key", "")).startswith("Twitch")
+        height = min(max_height, 720) if twitch else max_height
+        # prefer H.264 + AAC so browsers can play the HLS stream through MSE (video is ~90% of the bytes)
+        fetch(
+            f"bv*[vcodec^=avc1][height<={height}][ext=mp4]/bv*[vcodec^=avc1][height<={height}]/"
+            f"bv*[height<={height}][ext=mp4]",
+            "video",
+            paths.video,
+            0.0,
+            1.0,
+        )
+
+    if part == "video":
+        video()
+        _no_hevc(paths.video, tmp)
+        shutil.rmtree(tmp, ignore_errors=True)
+        return slim
+
+    # before the media, so the library card has a picture during a long download; card-sized:
+    # YouTube's mqdefault, and Twitch's CDN serves any "-<w>x<h>.jpg" size
+    if not paths.thumb.exists():
+        if meta.get("extractor_key") == "Youtube":
+            _thumbnail(f"https://i.ytimg.com/vi/{slim['id']}/mqdefault.jpg", paths.thumb)
+        elif thumb := slim["thumbnail"]:
+            _thumbnail(re.sub(r"-\d+x\d+\.jpg$", "-320x180.jpg", thumb), paths.thumb)
+            if not paths.thumb.exists():
+                _thumbnail(thumb, paths.thumb)
+    try:
+        fetch("ba[ext=m4a]/ba[acodec^=mp4a]/ba", "audio", paths.audio, 0.0, 1.0)
+    except DownloadError as e:
+        if "format is not available" not in str(e):
+            raise
+        # Twitch clips have no audio-only format: the audio comes out of the video
+        video()
+        if not _has_audio(paths.video):
+            raise
+        part_file = tmp / "audio.m4a"
+        ff.run_ffmpeg(["-i", str(paths.video), "-map", "0:a:0", "-c", "copy", str(part_file)])
+        shutil.move(part_file, paths.audio)
     atomic_write_json(paths.info, slim)
     if progress:
         progress(1.0)

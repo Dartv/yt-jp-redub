@@ -1,7 +1,8 @@
 """Job queue (FIFO, one job at a time) and the per-job pipeline driver.
 
-Subtitles come first: ASR and translation run over the whole video, while the dub
-runs chunk by chunk in priority order as soon as a chunk's lines are translated.
+The audio downloads first, and the video while the rest runs. Subtitles come first: ASR and
+translation run over the whole video, while the dub runs chunk by chunk in priority order as
+soon as a chunk's lines are translated.
 """
 
 from __future__ import annotations
@@ -329,7 +330,13 @@ class Worker:
         paths = self.paths(vid)
         for stale in (paths.export, paths.dub_audio):  # they would be stale once the job changes
             stale.unlink(missing_ok=True)
-        await self._download(vid, paths)
+        video = await self._download(vid, paths)
+        try:
+            return await self._process(vid, paths, video)
+        finally:
+            video.cancel()  # shortcut: a yt-dlp download already under way runs on to its end
+
+    async def _process(self, vid: str, paths: VideoPaths, video: asyncio.Task) -> LinesDoc:
         doc = await self._transcribe(vid, paths)
         if (
             self.models.low_vram
@@ -354,8 +361,8 @@ class Worker:
             )
             original = asyncio.create_task(asyncio.to_thread(hls.encode_en_segments, paths, doc))
             try:
-                await dub_video(self, vid, doc, translation)
-                await asyncio.gather(translation, original)
+                await dub_video(self, vid, doc, translation, video)
+                await asyncio.gather(translation, original, video)
             finally:
                 translation.cancel()
                 original.cancel()
@@ -364,26 +371,45 @@ class Worker:
         finally:
             self._docs.pop(vid, None)
 
-    async def _download(self, vid: str, paths: VideoPaths) -> None:
+    async def _download(self, vid: str, paths: VideoPaths) -> asyncio.Task:
+        """Downloads the audio, which is all transcription and the dub need; returns the task that
+        downloads the video meanwhile and makes its HLS segments (the player starts once it's done)."""
         cfg = self.cfg
-        if paths.video.exists() and paths.audio.exists() and paths.info.exists():
+        url = self.db.get_job(vid)["url"]
+        if paths.audio.exists() and paths.info.exists():
             info = json.loads(paths.info.read_text(encoding="utf-8"))
         else:
             self.set_stage(vid, "downloading")
             info = await asyncio.to_thread(
                 download.download,
-                self.db.get_job(vid)["url"],
+                url,
                 paths,
                 cfg.download.max_height,
                 cfg.download.cookies_file,
                 self._progress_cb(vid),
+                "audio",
             )
         if not paths.audio_wav.exists():
             await asyncio.to_thread(ff.to_wav, paths.audio, paths.audio_wav)
         self.db.update_job(
             vid, title=info.get("title"), duration=await asyncio.to_thread(ff.duration, paths.audio_wav)
         )
-        await asyncio.to_thread(hls.prepare_video, paths, cfg.stream.video_segment_sec)
+
+        async def video() -> None:
+            if not (paths.hls / "video.m3u8").exists():
+                await asyncio.to_thread(
+                    download.download,
+                    url,
+                    paths,
+                    cfg.download.max_height,
+                    cfg.download.cookies_file,
+                    None,
+                    "video",
+                )
+                await asyncio.to_thread(hls.prepare_video, paths, cfg.stream.video_segment_sec)
+            self.notify(vid)  # ready to play
+
+        return asyncio.create_task(video())
 
     async def _transcribe(self, vid: str, paths: VideoPaths) -> LinesDoc:
         doc = paths.load_lines()

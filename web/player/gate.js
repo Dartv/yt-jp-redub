@@ -1,5 +1,5 @@
 import { $, video } from "./dom.js";
-import { info, status } from "./job.js";
+import { status } from "./job.js";
 import { hideOverlay, overlay } from "./overlay.js";
 import { startAt } from "./playhead.js";
 import { prefs } from "./prefs.js";
@@ -7,8 +7,9 @@ import * as source from "./source.js";
 import { canPlay, dubbedUntil, etaText } from "./timeline.js";
 import { pct } from "../common.js";
 
-// When playback may run. With the Japanese voice, it waits at the start until enough is dubbed,
-// and pauses when it catches up with the dub; the viewer's own pauses are kept apart from those.
+// When playback may run. With the Japanese voice, it starts as soon as the part at the start point is
+// dubbed, and pauses when it catches up with the dub; the viewer's own pauses are kept apart from those.
+const LEAD = 1.5; // seconds of dub ahead of the playhead that playback needs to go on
 export let started = false, // past the first wait for the dub
   waitingDub = false, // paused by the player, until more is dubbed
   userPaused = false, // paused by the viewer
@@ -36,7 +37,7 @@ export function maybeStart() {
     );
     return;
   }
-  if (lang === "ja" && !canPlay(status, startAt, info.head_start_sec, prefs.rate)) {
+  if (lang === "ja" && !canPlay(status, startAt, LEAD, prefs.rate)) {
     const parts = [];
     if (status.total_lines && status.translated < status.total_lines)
       parts.push(`translating ${pct(status.translated, status.total_lines)}%`);
@@ -56,7 +57,7 @@ export function checkCatchUp() {
   if (!status || lang !== "ja" || !started) return;
   const t = video.currentTime,
     until = dubbedUntil(status, t);
-  if (!waitingDub && !video.paused && until < status.duration && until - t < 1.5) {
+  if (!waitingDub && !video.paused && until < status.duration && until - t < LEAD) {
     waitingDub = true;
     video.pause();
   }
@@ -115,7 +116,7 @@ export function setupGate() {
     if (!started || lang !== "ja") return;
     const t = video.currentTime,
       until = dubbedUntil(status, t);
-    if (until - t < 1.5 && until < status.duration) {
+    if (until - t < LEAD && until < status.duration) {
       waitingDub = true;
       video.pause();
       checkCatchUp();

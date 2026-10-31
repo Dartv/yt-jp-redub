@@ -6,7 +6,6 @@ export const vid = location.pathname.split("/").pop();
 export const media = `/media/${vid}`;
 export const params = new URLSearchParams(location.search);
 export let status = null;
-export let info = { head_start_sec: 120 };
 
 const listeners = [];
 /** Calls fn with each new status, in the order subscribed. */
@@ -33,10 +32,5 @@ async function poll() {
   }
 }
 export function startPolling() {
-  fetch("/api/info")
-    .then((r) => r.json())
-    .then((i) => {
-      info = i;
-    })
-    .finally(poll);
+  poll();
 }

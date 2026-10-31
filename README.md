@@ -69,7 +69,7 @@ Videos are dubbed one at a time, in the order you add them, with no length limit
 
 ### Watching
 
-While the first part is being dubbed, the player shows what it's doing and how long until it can start ("ready in ~20 s"), then starts by itself. It waits until the dub is projected to stay ahead of playback to the end, or until 2 minutes are dubbed (`head_start_sec`), whichever comes first. If playback catches up with the dub anyway, it pauses with the same countdown and resumes on its own.
+While the first part is being dubbed, the player shows what it's doing and how long until it can start ("ready in ~20 s"), then starts by itself as soon as the part it starts from is dubbed. If playback catches up with the dub, it pauses with the same countdown and resumes on its own.
 
 - Voice (talking-head icon): 日本語 or EN switches the spoken language.
 - Subtitles (captions icon): JA and EN switch each language's subtitles on or off. They're plain page text, so Yomitan can scan them. With a mouse, pointing at a subtitle pauses so you can look words up, and moving off it resumes; clicking or tapping a subtitle pauses until you press play.

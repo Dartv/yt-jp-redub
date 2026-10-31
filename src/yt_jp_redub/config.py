@@ -62,7 +62,7 @@ DEFAULTS: dict = {
         "emo_alpha": 1.0,
         "num_beams": 1,
     },
-    "stream": {"head_start_sec": 120, "lookahead_chunks": 3, "hold_sec": 20, "video_segment_sec": 6},
+    "stream": {"lookahead_chunks": 3, "hold_sec": 20, "video_segment_sec": 6},
 }
 
 
