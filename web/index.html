@@ -15,7 +15,14 @@
     <main class="page">
       <header class="brand">
         <h1>yt-jp-<b>redub</b></h1>
-        <span>YouTube, dubbed into Japanese</span>
+        <span>YouTube and Twitch, dubbed into Japanese</span>
+        <aside class="phone" id="phone" hidden>
+          <img src="/qr.svg" alt="QR code of the phone address" width="84" height="84" />
+          <div>
+            <b>Open on your phone</b>
+            <span>Point the camera at the code. Same Wi-Fi.</span>
+          </div>
+        </aside>
       </header>
 
       <form class="add" id="add">
@@ -23,10 +30,23 @@
           id="url"
           type="url"
           inputmode="url"
-          placeholder="Paste a YouTube link"
+          placeholder="Paste a YouTube or Twitch link"
           autocomplete="off"
           required
         />
+        <button
+          type="button"
+          class="paste"
+          id="paste"
+          aria-label="Dub the link from the clipboard"
+          title="Dub the link from the clipboard"
+        >
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M16 3h-1.2a3 3 0 0 0-5.6 0H8a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-4-.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2zM16 20H8V5h1v2h6V5h1z"
+            />
+          </svg>
+        </button>
         <button type="submit">Dub</button>
       </form>
 
@@ -36,7 +56,7 @@
         <summary>Other ways to add videos</summary>
         <p>
           Bookmarklet: drag <a id="bm" class="bookmarklet" href="#">Dub this</a> to your bookmarks bar and
-          click it on a YouTube video.
+          click it on a YouTube video or a Twitch VOD or clip.
         </p>
         <p>Command line: <code>uv run yt-jp-redub add &lt;url&gt;</code></p>
         <p>Phone on the same Wi-Fi: open <code id="base"></code></p>
@@ -44,6 +64,7 @@
       </details>
     </main>
 
+    <script src="/static/download.js"></script>
     <script src="/static/library.js"></script>
   </body>
 </html>

@@ -1,6 +1,6 @@
 # yt-jp-redub
 
-Dub any YouTube video, including stream VODs, into Japanese, so you can practise listening with the Western content you already watch.
+Dub any YouTube video, Twitch VOD or Twitch clip into Japanese, so you can practise listening with the Western content you already watch.
 
 - Each speaker keeps **their own voice and emotion**: every line is voiced by [IndexTTS-2.5](https://github.com/index-tts/index-tts) using that line's original audio as the reference.
 - **Japanese and English subtitles** that [Yomitan](https://github.com/yomidevs/yomitan) can scan and [asbplayer](https://github.com/killergerbah/asbplayer) can load.
@@ -38,13 +38,17 @@ At the end it prints the one firewall command needed so your phone can reach the
 uv run yt-jp-redub serve
 ```
 
-It prints the library address, for example `http://192.168.1.20:8765/`. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
+It prints the library address, for example `http://192.168.1.20:8765/`, and a QR code of it. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
+
+**Phone:** on the same Wi-Fi, point the camera at the QR code (in the terminal, or at the top right of the library page on the PC). Then use the browser's **Add to Home screen** to reach it in one tap next time.
 
 ### Adding videos
 
-- **Library page:** paste a link into the box.
-- **Bookmarklet (PC):** drag "Dub this" from the library page's help section to your bookmarks bar, then click it on any YouTube video page.
+- **Library page:** paste a link into the box; a pasted YouTube or Twitch VOD/clip link starts dubbing right away. The clipboard button next to it dubs the copied link in one tap on the PC. On a phone the page can't read the clipboard (browsers allow that only over HTTPS), so the button opens the box instead, and the keyboard's suggestion bar offers the copied link: tap it.
+- **Bookmarklet (PC):** drag "Dub this" from the library page's help section to your bookmarks bar, then click it on any YouTube video or Twitch VOD/clip page.
 - **CLI:** `uv run yt-jp-redub add <url>` queues the video on the running server and opens the player.
+
+Twitch: VODs (`twitch.tv/videos/…`) and clips work; live streams don't. Twitch video is capped at 720p, since streams run for hours. Subscriber-only VODs need `cookies_file` in `config.toml`. A whole VOD downloads before dubbing starts, so a multi-hour stream takes a while to get going.
 
 Jobs run one at a time, first in first out, with no length cap. Re-submitting a link that's already done or in progress just opens it again.
 
@@ -54,11 +58,26 @@ The player shows "preparing…" and starts by itself once about 2 minutes past t
 - **日本語 / English:** switches the audio track.
 - **JA / EN:** toggles the built-in subtitles. They're plain page text, so Yomitan can scan them. Tapping the subtitle area pauses playback until you press play.
 - **⛶:** fullscreen with subtitles overlaid on the picture. On a phone, turning it sideways goes fullscreen too. In portrait, the video sits on top with large subtitles underneath.
-- The lighter part of the seek bar shows what is already dubbed.
-- Keyboard: space plays/pauses, ←/→ seek 5 s, `f` toggles fullscreen.
+- **⚙:** playback speed (0.5×–1.5×) and subtitle size. Both are remembered on that device.
+- The lighter part of the seek bar shows what is already dubbed. In the library, a red line under a thumbnail shows how far you've watched.
+- Keyboard: space plays/pauses, ←/→ jump to the previous/next subtitle and ↓ to the start of the current one (as in asbplayer), `a`/`d` skip 5 s, `<`/`>` change the speed, `f` toggles fullscreen.
+- Touch: double-tap the left or right side to skip 5 s; swipe left/right for the next/previous subtitle.
+- The player remembers where you stopped (on the server, so it carries over between PC and phone) and resumes there. The title links to the original video on YouTube or Twitch at the current time. A failed video has a **Retry** button in the library and the player.
 - If audio switching misbehaves on a device, open the player with `?mode=variants` (switching then reloads at the current time).
 
 ### Offline
+
+Once a video is fully dubbed, **Download** (top right in the player, ⤓ on a library card) saves it to watch without the server, e.g. on a phone, as three files named like the video:
+- `… [JA dub].mp4`: Japanese (default) and English audio, Japanese and English subtitles.
+- `… [JA dub].ja.srt` and `… [JA dub].en.srt`: the subtitles as separate files, for players such as asbplayer.
+
+All three start at once. The first time, the browser may ask whether the page may download several files: allow it. When a dub finishes, its Japanese track is joined into one audio file (`dub.m4a`, about 90 MB per hour of video); a download then only packages existing streams, which takes a second or two. Videos dubbed before this feature get their track in the background when `serve` starts.
+
+To watch on a phone:
+- **VLC:** open the `.mp4`. It shows both audio tracks and both subtitle tracks. Many built-in gallery players show only the Japanese audio and no subtitles.
+- **asbplayer** (subtitle list, line-by-line navigation, Anki mining): once, while online, open [app.asbplayer.dev](https://app.asbplayer.dev) and use the browser's **Add to home screen**; from then on it also works offline ([asbplayer's offline guide](https://docs.asbplayer.dev/docs/guides/offline-usage)). Open it from the home screen and load the `.mp4` and the `.ja.srt` (and `.en.srt` if you want both). It plays the Japanese dub; switching to the English track needs Chrome's "Experimental Web Platform features" flag ([asbplayer's audio track guide](https://docs.asbplayer.dev/docs/guides/audio-track-selection)).
+
+This player page itself doesn't work offline: that needs HTTPS (browsers allow offline web apps only on secure origins), and the server is plain HTTP on your network.
 
 ```bash
 uv run yt-jp-redub process <url> -o video.mkv
@@ -147,6 +166,6 @@ web/                  library and player (plain HTML/CSS/JS, hls.js vendored)
 ## Licenses and disclaimer
 
 - This project: **GPL-3.0** ([LICENSE](LICENSE)).
-- Dependencies: yt-dlp (Unlicense, downloaded at runtime), Demucs (MIT), Parakeet TDT 0.6B v2 weights (CC-BY-4.0), WeSpeaker CAM++ (Apache-2.0), hls.js (Apache-2.0, vendored in `web/vendor`).
+- Dependencies: yt-dlp (Unlicense, downloaded at runtime), Demucs (MIT), Parakeet TDT 0.6B v2 weights (CC-BY-4.0), WeSpeaker CAM++ (Apache-2.0), hls.js (Apache-2.0, vendored in `web/vendor`), Project Nayuki's QR Code generator (MIT, vendored in `src/yt_jp_redub/_vendor`).
 - IndexTTS-2.5 weights fall under the [Bilibili Model Use License](https://huggingface.co/IndexTeam/IndexTTS-2.5). `setup` downloads them; they are never redistributed by this project.
 - Downloading YouTube content is for personal use only. You are responsible for complying with YouTube's Terms of Service and copyright law where you live.

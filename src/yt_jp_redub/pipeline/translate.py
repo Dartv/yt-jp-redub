@@ -1,7 +1,8 @@
 """English -> natural spoken Japanese through any OpenAI-compatible chat API.
 
 Batches of ~40 lines with preceding lines as context, JSON in and out keyed by
-line ID, and a check that every ID comes back. Gemma on Google AI Studio
+line ID, and a check that every ID comes back. One attempt per call: the caller
+(worker/translation.py) schedules retries. Gemma on Google AI Studio
 rejects system prompts, so by default the instructions go into the user message.
 """
 
@@ -10,7 +11,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
 import re
 import time
 from collections import deque
@@ -121,34 +121,57 @@ class OpenAITranslator:
         self.key, self.model, self.cfg, self.system_prompt = api_key, model, cfg, system_prompt
         self.limiter = RateLimiter(cfg.rpm, cfg.tpm)
         self._session: aiohttp.ClientSession | None = None
+        # reasoning effort goes out in the first shape the API accepts: OpenAI's top-level
+        # reasoning_effort, then OpenRouter's reasoning object, then not at all
+        effort = str(getattr(cfg, "reasoning_effort", "") or "").strip()
+        self._reasoning = (
+            [{"reasoning_effort": effort}, {"reasoning": {"effort": effort}}, {}] if effort else [{}]
+        )
 
     async def close(self):
         if self._session:
             await self._session.close()
 
-    async def _chat(self, prompt: str) -> str:
+    async def _chat(self, prompt: str, timeout: float) -> str:
         if self._session is None:
-            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=180))
+            self._session = aiohttp.ClientSession()
         if self.system_prompt:
             messages = [{"role": "system", "content": INSTRUCTIONS}, {"role": "user", "content": prompt}]
         else:
             messages = [{"role": "user", "content": INSTRUCTIONS + "\n\n" + prompt}]
-        body = {"model": self.model, "messages": messages, "temperature": self.cfg.temperature}
         await self.limiter.acquire(_est_tokens(INSTRUCTIONS + prompt) * 2)
-        async with self._session.post(
-            self.url, json=body, headers={"Authorization": f"Bearer {self.key}"}
-        ) as r:
-            text = await r.text()
-            if r.status == 429 or r.status >= 500:
-                raise _Retryable(f"HTTP {r.status}: {text[:300]}")
-            if r.status != 200:
-                raise RuntimeError(f"translation API HTTP {r.status}: {text[:500]}")
-            data = json.loads(text)
-            return data["choices"][0]["message"]["content"] or ""
+        while True:
+            extra = self._reasoning[0]
+            body = {"model": self.model, "messages": messages, "temperature": self.cfg.temperature, **extra}
+            async with self._session.post(
+                self.url,
+                json=body,
+                headers={"Authorization": f"Bearer {self.key}"},
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as r:
+                status, text = r.status, await r.text()
+            if status == 400 and extra and "reasoning" in text.lower():
+                log.warning("translation API rejected %s; trying without it", next(iter(extra)))
+                self._reasoning.pop(0)
+                continue
+            if status == 429 or status >= 500:
+                raise Retryable(f"HTTP {status}: {text[:300]}")
+            if status != 200:
+                raise RuntimeError(f"translation API HTTP {status}: {text[:500]}")
+            try:
+                return json.loads(text)["choices"][0]["message"]["content"] or ""
+            except (ValueError, LookupError, TypeError) as e:
+                raise Retryable(f"malformed reply: {text[:300]}") from e
 
     async def translate(
-        self, batch: list[Line], context: list[Line], budgets: dict[int, int] | None = None
+        self,
+        batch: list[Line],
+        context: list[Line],
+        budgets: dict[int, int] | None = None,
+        timeout: float | None = None,
     ) -> dict[int, str]:
+        """One attempt; raises Retryable when trying again may help. Retries are scheduled by
+        the caller, so a failing batch doesn't hold up the others."""
         prompt = ""
         if context:
             prompt += "Previous lines, for context only (do not translate):\n"
@@ -164,26 +187,19 @@ class OpenAITranslator:
             ensure_ascii=False,
         )
         want = {l.id for l in batch}
-        delay = 2.0
-        for attempt in range(self.cfg.max_retries + 1):
-            try:
-                reply = _extract_json(await self._chat(prompt))
-                got = {int(k): str(v).strip() for k, v in reply.items() if str(k).strip().isdigit()}
-                missing = want - got.keys()
-                if missing:
-                    raise _Retryable(f"{len(missing)} of {len(want)} line ids missing in reply")
-                return {k: got[k] for k in want}
-            except (TimeoutError, _Retryable, ValueError, aiohttp.ClientError, KeyError) as e:
-                if attempt == self.cfg.max_retries:
-                    raise RuntimeError(f"translation failed after retries: {e}") from e
-                log.warning("translate retry %d: %s: %s", attempt + 1, type(e).__name__, str(e)[:300])
-                await asyncio.sleep(delay + random.random())
-                delay = min(delay * 2, 60)
-        raise AssertionError
+        try:
+            reply = _extract_json(await self._chat(prompt, timeout or 180))
+        except (TimeoutError, ValueError, aiohttp.ClientError) as e:
+            raise Retryable(f"{type(e).__name__}: {e}") from e
+        got = {int(k): str(v).strip() for k, v in reply.items() if str(k).strip().isdigit()}
+        missing = want - got.keys()
+        if missing:
+            raise Retryable(f"{len(missing)} of {len(want)} line ids missing in reply")
+        return {k: got[k] for k in want}
 
 
-class _Retryable(Exception):
-    pass
+class Retryable(Exception):
+    """A failed attempt worth repeating (rate limit, server error, timeout, unusable reply)."""
 
 
 class MockTranslator:
@@ -203,7 +219,11 @@ class MockTranslator:
     )
 
     async def translate(
-        self, batch: list[Line], context: list[Line], budgets: dict[int, int] | None = None
+        self,
+        batch: list[Line],
+        context: list[Line],
+        budgets: dict[int, int] | None = None,
+        timeout: float | None = None,
     ) -> dict[int, str]:
         out = {}
         for l in batch:

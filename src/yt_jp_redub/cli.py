@@ -72,6 +72,8 @@ async def _serve(cfg) -> None:
         f"  asbplayer: ws://127.0.0.1:{cfg.server.ws_port}/ws\n",
         flush=True,
     )
+    if not base.startswith("http://127.0.0.1"):
+        _print_qr(base)
 
     await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
     loop = asyncio.get_running_loop()
@@ -83,6 +85,15 @@ async def _serve(cfg) -> None:
         await worker.close()
         for r in runners:
             await r.cleanup()
+
+
+def _print_qr(base: str) -> None:
+    """The library's address as a QR code: a phone on the same Wi-Fi opens it with its camera."""
+    from . import qr
+
+    code = "\n".join("  " + line for line in qr.terminal(base + "/").splitlines())
+    with contextlib.suppress(UnicodeEncodeError):  # output redirected to a file in a legacy encoding
+        print(f"  Phone: scan this with the camera (same Wi-Fi)\n\n{code}\n", flush=True)
 
 
 def _update_ytdlp() -> None:
@@ -121,7 +132,7 @@ def _add(cfg, url: str, open_browser: bool) -> int:
 # ---------------------------------------------------------------------------- process (offline)
 async def _process(cfg, url: str, out: Path | None) -> int:
     from .db import DB
-    from .pipeline.export import write_mkv
+    from .pipeline.export import write_file
     from .worker import Worker
 
     db = DB(cfg.db_path)
@@ -147,7 +158,7 @@ async def _process(cfg, url: str, out: Path | None) -> int:
     job = db.get_job(vid)
     paths = worker.paths(vid)
     out = out or Path.cwd() / f"{vid}.ja-dub.mkv"
-    await asyncio.to_thread(write_mkv, paths, doc, out, job["title"] or vid)
+    await asyncio.to_thread(write_file, paths, doc, out, job["title"] or vid)
     worker.cleanup(paths)  # the video stays watchable in the library
     dur = job["duration"] or 1
     print(f"\nWrote {out}")

@@ -48,7 +48,7 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 110
 target-version = "py311"
-extend-exclude = ["third_party"]
+extend-exclude = ["third_party", "src/yt_jp_redub/_vendor/qrcodegen.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF"]

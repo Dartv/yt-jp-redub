@@ -26,6 +26,10 @@ async def dub_video(w, vid: str, doc: LinesDoc, translation: asyncio.Task) -> No
         done = {c for c in w.db.done_chunks(vid) if paths.seg("ja", c).exists()}
         if len(done) >= n:
             return
+        if translation.done() and not translation.cancelled() and translation.exception():
+            # fail now rather than dub the chunks that happen to be translated while the one
+            # being watched never will be
+            translation.result()
         urgent = w.sched.next(vid, n, done, lambda _: True)
         c = w.sched.next(vid, n, done, translated)
         if c != urgent and not translation.done():

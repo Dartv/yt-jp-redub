@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
   last_watched_at REAL,
+  resume_at REAL,
   size_bytes INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS chunks (
@@ -43,6 +44,9 @@ class DB:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(SCHEMA)
+            cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(jobs)")}
+            if "resume_at" not in cols:  # databases from before resume positions
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN resume_at REAL")
 
     def _x(self, sql: str, args=()) -> list[sqlite3.Row]:
         with self._lock:

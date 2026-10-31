@@ -27,10 +27,20 @@ def job_status(w, video_id: str) -> dict | None:
         "ready": doc is not None and (w.paths(video_id).hls / "video.m3u8").exists(),
         "position": pending.index(video_id) if video_id in pending else None,
         "last_watched_at": job["last_watched_at"],
+        "resume_at": job["resume_at"],
         "size_bytes": job["size_bytes"],
     }
     out["percent"] = percent(out)
+    out["download_size"] = download_size(w.paths(video_id))
     return out
+
+
+def download_size(paths) -> int | None:
+    """About how big the offline .mp4 will be (it holds these streams), once its dub track exists."""
+    try:
+        return sum(p.stat().st_size for p in (paths.video, paths.dub_audio, paths.audio))
+    except FileNotFoundError:
+        return None
 
 
 def percent(s: dict) -> int:

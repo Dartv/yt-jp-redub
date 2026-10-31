@@ -27,6 +27,7 @@ DEFAULTS: dict = {
         "max_retries": 20,
         "temperature": 0.4,
         "concurrency": 3,
+        "reasoning_effort": "low",
     },
     "separate": {"backend": "demucs", "model": "htdemucs", "device": "cuda"},
     "tts": {

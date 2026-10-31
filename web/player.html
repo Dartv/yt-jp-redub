@@ -15,7 +15,8 @@
   <body class="player">
     <header class="player-top">
       <a href="/" aria-label="Library">‹</a>
-      <div class="t" id="topTitle"></div>
+      <a class="t yt" id="topTitle" target="_blank" rel="noopener" title="Open the original video"></a>
+      <button class="dl" id="dl" hidden></button>
     </header>
 
     <div class="stage-wrap">
@@ -32,7 +33,11 @@
           <div class="big" id="ovTitle">Preparing…</div>
           <div class="small" id="ovText"></div>
           <button class="play" id="ovPlay" hidden aria-label="Play">▶</button>
+          <button class="retry" id="ovRetry" hidden>Retry</button>
         </div>
+
+        <div class="skip-hint back" id="skipBack"></div>
+        <div class="skip-hint fwd" id="skipFwd"></div>
 
         <div class="controls" id="controls">
           <div class="seek" id="seek">
@@ -51,18 +56,33 @@
             </div>
             <button class="chip on" id="subBtnJa" aria-label="Japanese subtitles">字</button>
             <button class="chip" id="subBtnEn" aria-label="English subtitles">EN</button>
+            <button class="icon" id="setBtn" aria-label="Settings" aria-haspopup="true"></button>
             <button class="icon" id="fsBtn" aria-label="Fullscreen"></button>
+          </div>
+          <div class="menu" id="menu" hidden>
+            <div class="menu-label">Speed</div>
+            <div class="pill" id="rates" role="group" aria-label="Playback speed">
+              <button data-v="0.5">0.5</button><button data-v="0.75">0.75</button
+              ><button data-v="1">1×</button><button data-v="1.25">1.25</button
+              ><button data-v="1.5">1.5</button>
+            </div>
+            <div class="menu-label">Subtitle size</div>
+            <div class="pill" id="sizes" role="group" aria-label="Subtitle size">
+              <button data-v="0.8">S</button><button data-v="1">M</button><button data-v="1.25">L</button
+              ><button data-v="1.5">XL</button>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
     <section class="below">
-      <h2 id="title"></h2>
+      <h2><a class="yt" id="title" target="_blank" rel="noopener" title="Open the original video"></a></h2>
       <div class="status" id="status"></div>
       <div class="actions"><button id="asbBtn" hidden>Send subtitles to asbplayer</button></div>
     </section>
 
+    <script src="/static/download.js"></script>
     <script src="/static/player.js"></script>
   </body>
 </html>

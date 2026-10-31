@@ -12,13 +12,30 @@ from pathlib import Path
 YT_ID_RE = re.compile(
     r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|live/|shorts/|embed/|v/)|youtu\.be/|youtube\.com/.*[?&]v=)([A-Za-z0-9_-]{11})"
 )
+TWITCH_VOD_RE = re.compile(r"twitch\.tv/(?:videos/|[^/?#]+/v/|\?(?:.*&)?video=v?)(\d+)")
+TWITCH_CLIP_RE = re.compile(
+    r"(?:clips\.twitch\.tv/(?:embed\?(?:.*&)?clip=)?|twitch\.tv/[^/?#]+/clip/)([A-Za-z0-9_-]+)"
+)
+# a video's id is also its folder name and URL path segment; the Twitch prefixes make them longer
+# than an 11-character YouTube id (VOD numbers have 10 digits, clip slugs are longer still)
+VID_RE = r"[A-Za-z0-9_-]{11}|twitch-[0-9]+|twitchclip-[A-Za-z0-9_-]+"
 
 STAGES = ("queued", "downloading", "transcribing", "translating", "dubbing", "done", "error")
 
 
-def youtube_id(url: str) -> str | None:
-    m = YT_ID_RE.search(url)
-    return m.group(1) if m else None
+def video_ref(url: str) -> tuple[str, str] | None:
+    """(id, canonical URL) of a YouTube video, Twitch VOD or Twitch clip link; None for anything else."""
+    if m := YT_ID_RE.search(url):
+        return m.group(1), f"https://www.youtube.com/watch?v={m.group(1)}"
+    if m := TWITCH_VOD_RE.search(url):
+        return f"twitch-{m.group(1)}", f"https://www.twitch.tv/videos/{m.group(1)}"
+    if (m := TWITCH_CLIP_RE.search(url)) and m.group(1) != "embed":
+        return f"twitchclip-{m.group(1)}", f"https://clips.twitch.tv/{m.group(1)}"
+    return None
+
+
+def is_youtube(video_id: str) -> bool:
+    return not video_id.startswith("twitch")
 
 
 @dataclass
@@ -89,7 +106,7 @@ def atomic_write_json(path: Path, obj) -> None:
 
 
 class VideoPaths:
-    """File layout of data/videos/<youtube_id>/."""
+    """File layout of data/videos/<video id>/."""
 
     def __init__(self, videos_dir: Path, video_id: str):
         self.id = video_id
@@ -105,6 +122,8 @@ class VideoPaths:
     subs = property(lambda s: s.root / "subs")
     chunks = property(lambda s: s.root / "chunks")
     hls = property(lambda s: s.root / "hls")
+    dub_audio = property(lambda s: s.root / "dub.m4a")  # the whole dub as one track, once done
+    export = property(lambda s: s.root / "export.mp4")  # offline download, packaged on request
 
     def chunk_dir(self, n: int) -> Path:
         return self.chunks / f"{n:04d}"

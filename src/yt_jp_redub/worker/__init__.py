@@ -12,13 +12,15 @@ import json
 import logging
 import shutil
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from functools import cached_property
+from pathlib import Path
 
 from ..config import Config
 from ..db import DB
-from ..models import LinesDoc, VideoPaths, Word, atomic_write_json, youtube_id
-from ..pipeline import asr, download, ff, hls, segment, subs
+from ..models import LinesDoc, VideoPaths, Word, atomic_write_json, video_ref
+from ..pipeline import asr, download, export, ff, hls, segment, subs
 from ..pipeline.pace import PaceModel
 from .dubbing import dub_video
 from .scheduler import ChunkScheduler
@@ -84,6 +86,8 @@ class Worker:
         self._wake = asyncio.Event()
         self._docs: dict[str, LinesDoc] = {}  # live docs of jobs being processed
         self._disk_docs: dict[str, tuple[float, LinesDoc]] = {}
+        self._offline_locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
+        self._tasks: set[asyncio.Task] = set()  # background work, referenced until done
 
     # ------------------------------------------------------------------ queries
     def paths(self, video_id: str) -> VideoPaths:
@@ -111,10 +115,11 @@ class Worker:
 
     # ------------------------------------------------------------------ commands
     def submit(self, url: str) -> tuple[str, bool]:
-        vid = youtube_id(url)
-        if not vid:
-            raise ValueError("not a YouTube video URL")
-        created = self.db.add_job(vid, f"https://www.youtube.com/watch?v={vid}")
+        ref = video_ref(url)
+        if not ref:
+            raise ValueError("not a YouTube video or Twitch VOD/clip URL")
+        vid, canonical = ref
+        created = self.db.add_job(vid, canonical)
         if self.db.get_job(vid)["stage"] == "error":
             self.db.update_job(vid, stage="queued", error=None)
             created = True
@@ -129,11 +134,55 @@ class Worker:
         self.db.delete_job(video_id)
         self._disk_docs.pop(video_id, None)
 
-    def report_playhead(self, video_id: str, t: float) -> None:
+    def report_playhead(self, video_id: str, t: float, save: bool = True) -> None:
+        """Where the viewer is: a priority hint, and (with save) where the video resumes next time."""
         doc = self.doc(video_id)
         if doc and doc.chunks:
             self.sched.set_playhead(video_id, doc.chunk_at(t))
-        self.db.update_job(video_id, last_watched_at=time.time())
+        fields = {"last_watched_at": time.time()}
+        if save:
+            fields["resume_at"] = max(0.0, t)
+        self.db.update_job(video_id, **fields)
+
+    # ------------------------------------------------------------------ offline download
+    async def dub_track(self, vid: str) -> Path:
+        """The finished dub as one audio track: made once, when the dub is done (or on first need
+        for videos dubbed before this existed), so a download only packages streams."""
+        paths = self.paths(vid)
+        async with self._offline_locks[vid]:
+            if not paths.dub_audio.exists():
+                await asyncio.to_thread(export.write_dub_track, paths, self.doc(vid))
+        return paths.dub_audio
+
+    async def offline_file(self, vid: str) -> Path:
+        """The .mp4 download, packaged on request (a second or two; nothing is re-encoded). Only the
+        latest one is kept, so downloads don't double the disk use."""
+        paths = self.paths(vid)
+        await self.dub_track(vid)
+        async with self._offline_locks[vid]:
+            if not paths.export.exists() or paths.export.stat().st_mtime < paths.dub_audio.stat().st_mtime:
+                title = self.db.get_job(vid)["title"] or vid
+                await asyncio.to_thread(export.write_file, paths, self.doc(vid), paths.export, title)
+        self._drop_offline_files(keep=paths.export)
+        return paths.export
+
+    def _drop_offline_files(self, keep: Path | None = None) -> None:
+        for p in self.cfg.videos_dir.glob("*/export.mp4"):
+            if p != keep:
+                with contextlib.suppress(OSError):  # Windows: still being sent
+                    p.unlink()
+
+    def _background(self, coro) -> None:
+        task = asyncio.create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _make_dub_tracks(self, vids: list[str]) -> None:
+        for vid in vids:
+            try:
+                await self.dub_track(vid)
+            except Exception:
+                log.exception("Joining the dub of %s into one track failed", vid)
 
     def request_segment(self, video_id: str, chunk: int) -> None:
         self.sched.request(video_id, chunk)
@@ -167,6 +216,14 @@ class Worker:
     # ------------------------------------------------------------------ the queue
     async def run(self) -> None:
         self._enforce_cap()
+        # finished videos from before dub tracks existed get one now, so their download is instant
+        self._drop_offline_files()
+        done = [j["video_id"] for j in self.db.list_jobs() if j["stage"] == "done"]
+        self._background(
+            self._make_dub_tracks(
+                [v for v in done if self.status(v)["ready"] and not self.paths(v).dub_audio.exists()]
+            )
+        )
         while True:
             pending = self.db.pending_jobs()
             if not pending:
@@ -177,6 +234,7 @@ class Worker:
             try:
                 await self.process(vid)
                 self.cleanup(self.paths(vid))
+                self._background(self._make_dub_tracks([vid]))
             except Exception as e:
                 log.exception("job %s failed", vid)
                 self.set_stage(vid, "error", error=f"{type(e).__name__}: {e}"[:1000])
@@ -190,6 +248,8 @@ class Worker:
     async def process(self, vid: str) -> LinesDoc:
         """Runs (or resumes) every stage of one job; each stage skips work already on disk."""
         paths = self.paths(vid)
+        for stale in (paths.export, paths.dub_audio):  # they would be stale once the job changes
+            stale.unlink(missing_ok=True)
         await self._download(vid, paths)
         doc = await self._transcribe(vid, paths)
         self._docs[vid] = doc

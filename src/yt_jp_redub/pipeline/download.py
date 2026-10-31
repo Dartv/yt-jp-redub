@@ -1,4 +1,4 @@
-"""Download: H.264 video-only + AAC audio through the managed yt-dlp binary, never re-encoded."""
+"""Download: H.264 video + AAC audio through the managed yt-dlp binary, re-encoded only if HEVC."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..models import VideoPaths, atomic_write_json
-from . import ytdlp
+from . import ff, ytdlp
 from .ytdlp import DownloadError
 
 log = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ def download(
 ) -> dict:
     """Downloads source.mp4 (video only), source.m4a and thumb.jpg; returns slim video info.
 
+    Works for any site yt-dlp supports; the app accepts YouTube and Twitch VODs/clips.
     YouTube breaks yt-dlp regularly, so a failure forces a yt-dlp update and one more try;
     intermittent HTTP 403s on media URLs get a few retries with freshly extracted URLs.
     """
@@ -72,6 +73,15 @@ def _download(
             "was_live",
         )
     }
+    # before the media, so the library card has a picture during a long download; card-sized:
+    # YouTube's mqdefault, and Twitch's CDN serves any "-<w>x<h>.jpg" size
+    if not paths.thumb.exists():
+        if meta.get("extractor_key") == "Youtube":
+            _thumbnail(f"https://i.ytimg.com/vi/{slim['id']}/mqdefault.jpg", paths.thumb)
+        elif thumb := slim["thumbnail"]:
+            _thumbnail(re.sub(r"-\d+x\d+\.jpg$", "-320x180.jpg", thumb), paths.thumb)
+            if not paths.thumb.exists():
+                _thumbnail(thumb, paths.thumb)
 
     def fetch(fmt: str, name: str, target: Path, lo: float, hi: float) -> None:
         if target.exists():
@@ -110,6 +120,9 @@ def _download(
             raise DownloadError(f"yt-dlp produced no {name} file")
         shutil.move(files[0], target)
 
+    # Twitch streams run for hours at 60 fps: 1080p would be ~3.7 GB an hour, 720p roughly half
+    if str(meta.get("extractor_key", "")).startswith("Twitch"):
+        max_height = min(max_height, 720)
     # prefer H.264 + AAC so browsers can play the HLS stream through MSE (video is ~90% of the bytes)
     fetch(
         f"bv*[vcodec^=avc1][height<={max_height}][ext=mp4]/bv*[vcodec^=avc1][height<={max_height}]/"
@@ -119,18 +132,55 @@ def _download(
         0.0,
         0.9,
     )
+    if not paths.audio.exists() and _has_audio(paths.video):
+        # Twitch muxes the audio into every video format: take it from there instead of downloading again
+        part = tmp / "audio.m4a"
+        ff.run_ffmpeg(["-i", str(paths.video), "-map", "0:a:0", "-c", "copy", str(part)])
+        shutil.move(part, paths.audio)
     fetch("ba[ext=m4a]/ba[acodec^=mp4a]/ba", "audio", paths.audio, 0.9, 1.0)
+    _no_hevc(paths.video, tmp)
     shutil.rmtree(tmp, ignore_errors=True)
-    if not paths.thumb.exists():
-        _thumbnail(slim["id"], paths.thumb)
     atomic_write_json(paths.info, slim)
     if progress:
         progress(1.0)
     return slim
 
 
-def _thumbnail(video_id: str, out: Path) -> None:
+def _has_audio(path: Path) -> bool:
+    return any(s["codec_type"] == "audio" for s in ff.probe(path)["streams"])
+
+
+def _no_hevc(video: Path, tmp: Path) -> None:
+    """Re-encodes HEVC, which Firefox can't play (Twitch clips come only in HEVC), to H.264, video only."""
+    codec = next(s for s in ff.probe(video)["streams"] if s["codec_type"] == "video")["codec_name"]
+    if codec != "hevc":
+        return
+    log.info("re-encoding HEVC video to H.264")
+    part = tmp / "video.h264.mp4"
+    ff.run_ffmpeg(
+        [
+            "-i",
+            str(video),
+            "-map",
+            "0:v:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "20",
+            "-pix_fmt",
+            "yuv420p",
+            "-force_key_frames",
+            "expr:gte(t,n_forced*2)",  # a keyframe every 2 s, so HLS can cut segments anywhere
+            str(part),
+        ]
+    )
+    shutil.move(part, video)
+
+
+def _thumbnail(url: str, out: Path) -> None:
     try:
-        urllib.request.urlretrieve(f"https://i.ytimg.com/vi/{video_id}/mqdefault.jpg", out)
+        urllib.request.urlretrieve(url, out)
     except OSError as e:  # the server falls back to YouTube's own URL
         log.debug("thumbnail download failed: %s", e)

@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
+from urllib.parse import quote
 
 from aiohttp import web
 
+from .. import qr
 from ..config import ROOT, Config
+from ..models import VID_RE, is_youtube
 from ..net import public_base
 from ..pipeline import hls
 from ..worker import Worker
@@ -16,7 +20,14 @@ from ..worker import Worker
 log = logging.getLogger(__name__)
 WEB = ROOT / "web"
 NO_STORE = {"Cache-Control": "no-store"}
-VID_RE = r"[A-Za-z0-9_-]{11}"
+
+
+def attachment(title: str, vid: str, ext: str = ".mp4") -> str:
+    """Content-Disposition for an offline file: the video's title (UTF-8, for browsers that take
+    filename*), with the plain video id as the fallback name. The .mp4 and its .ja.srt/.en.srt
+    share the name, so they sit together on the phone."""
+    name = " ".join(re.sub(r'[\x00-\x1f\\/:*?"<>|]', " ", title).split()).strip(".")[:150] or vid
+    return f"attachment; filename=\"{vid}{ext}\"; filename*=UTF-8''{quote(name + ' [JA dub]' + ext)}"
 
 
 def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
@@ -48,7 +59,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         try:
             vid, _ = worker.submit(url)
         except ValueError:
-            raise web.HTTPBadRequest(text=f"Not a YouTube video URL: {url}") from None
+            raise web.HTTPBadRequest(text=f"Not a YouTube video or Twitch VOD/clip URL: {url}") from None
         raise web.HTTPFound(f"/watch/{vid}")
 
     r.add_get("/", index)
@@ -102,7 +113,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         vid = req.match_info["vid"]
         job_or_404(vid)
         data = await req.json()
-        worker.report_playhead(vid, float(data.get("t", 0)))
+        worker.report_playhead(vid, float(data.get("t", 0)), save=bool(data.get("save", True)))
         if asb and data.get("asbplayer"):
             asb.watching(vid)
         return web.json_response({"ok": True})
@@ -130,6 +141,10 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         n = await asb.send_subtitles(vid, force=True)
         return web.json_response({"clients": n})
 
+    async def qr_code(_):
+        return web.Response(text=qr.svg(base() + "/"), content_type="image/svg+xml", headers=NO_STORE)
+
+    r.add_get("/qr.svg", qr_code)
     r.add_get("/api/info", api_info)
     r.add_post("/api/jobs", api_submit)
     r.add_get("/api/jobs", api_list)
@@ -211,7 +226,44 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         vid, paths = media_paths(req)
         if paths.thumb.exists():
             return web.FileResponse(paths.thumb)
+        if not is_youtube(vid):
+            raise web.HTTPNotFound()
         raise web.HTTPFound(f"https://i.ytimg.com/vi/{vid}/mqdefault.jpg")
+
+    async def download(req):
+        """The .mp4 for offline viewing, packaged now from the finished streams."""
+        vid = req.match_info["vid"]
+        job = job_or_404(vid)
+        if job["stage"] != "done" or not job["ready"]:
+            raise web.HTTPConflict(text="Only a fully dubbed video can be downloaded")
+        try:
+            path = await worker.offline_file(vid)
+        except Exception:
+            log.exception("Packaging %s for download failed", vid)
+            raise web.HTTPInternalServerError(text="Couldn't build the file; see the server log") from None
+        return web.FileResponse(
+            path,
+            headers={
+                "Content-Type": "video/mp4",
+                "Content-Disposition": attachment(job["title"] or vid, vid),
+            },
+        )
+
+    async def download_subs(req):
+        vid, paths = media_paths(req)
+        lang = req.match_info["lang"]
+        p = paths.subs / f"{lang}.srt"
+        if not p.exists():
+            raise web.HTTPNotFound()
+        title = worker.db.get_job(vid)["title"] or vid
+        return web.Response(
+            body=p.read_bytes(),
+            headers={
+                "Content-Type": "application/x-subrip; charset=utf-8",
+                "Content-Disposition": attachment(title, vid, f".{lang}.srt"),
+                **NO_STORE,
+            },
+        )
 
     m = f"/media/{{vid:{VID_RE}}}"
     r.add_get(f"{m}/master.m3u8", master)
@@ -221,6 +273,8 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     r.add_get(f"{m}/{{lang:ja|en}}/{{n:\\d+}}.aac", audio_segment)
     r.add_get(f"{m}/subs/{{lang:ja|en}}.{{ext:vtt|srt}}", subtitle)
     r.add_get(f"{m}/thumb.jpg", thumb)
+    r.add_get(f"{m}/download.mp4", download)
+    r.add_get(f"{m}/download.{{lang:ja|en}}.srt", download_subs)
 
     @web.middleware
     async def cors(req, handler):
