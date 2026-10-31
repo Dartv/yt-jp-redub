@@ -402,15 +402,16 @@ function hideControlsSoon() {
 }
 // a mouse only: after a tap, browsers also send a mousemove, which would undo the tap's toggle
 stage.addEventListener("pointermove", (e) => e.pointerType === "mouse" && showControls());
-// tap on the picture: on touch screens it shows/hides the controls (double tap on the left or
-// right part skips 5 s), with a mouse it plays/pauses
+// tap on the picture plays/pauses. On touch screens, while the controls are hidden (fullscreen or
+// sideways, during playback) it brings them up instead; in portrait they always show. A double tap
+// on the left or right part skips 5 s.
 const touchUI = matchMedia("(hover: none)").matches;
 let lastTap = { t: 0, side: 0 },
   tapTimer = 0,
   swipedAt = 0;
-function toggleControlsTap() {
-  if (stage.classList.contains("controls-on") && !video.paused) stage.classList.remove("controls-on");
-  else showControls();
+function tapPicture() {
+  if (getComputedStyle($("controls")).opacity > 0.5) togglePlay();
+  showControls();
 }
 stage.addEventListener("click", (e) => {
   if (e.target !== video && e.target !== stage) return;
@@ -433,7 +434,7 @@ stage.addEventListener("click", (e) => {
   }
   lastTap = { t: now, side };
   // on the sides, wait to see whether this is the first tap of a double tap
-  tapTimer = setTimeout(toggleControlsTap, side ? 320 : 0);
+  tapTimer = setTimeout(tapPicture, side ? 320 : 0);
 });
 
 // ------------------------------------------------------------------ skipping and subtitle navigation

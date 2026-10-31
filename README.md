@@ -72,7 +72,7 @@ While the first part is being dubbed, the player shows what it's doing and how l
 - The gear holds playback speed (0.5× to 1.5×) and subtitle size. These and the volume are remembered on that device.
 - The lighter part of the seek bar is what's already dubbed. In the library, a red line under a thumbnail shows how far you've watched.
 - Keyboard: space plays and pauses, ← and → jump to the previous or next subtitle and ↓ to the start of the current one (as in asbplayer), `a` and `d` skip 5 s, `<` and `>` change the speed, `m` mutes, `f` toggles fullscreen.
-- Touch: double-tap the left or right side to skip 5 s; swipe left or right for the next or previous subtitle.
+- Touch: tap the picture to pause or play (in fullscreen, when the controls are hidden, the first tap brings them up). Double-tap the left or right side to skip 5 s; swipe left or right for the next or previous subtitle.
 - The player remembers where you stopped (on the server, so it carries over between PC and phone) and resumes there. The title links to the original video at the current time.
 - If a video fails, the player says why and what to do about it (for example when YouTube asks to confirm you're not a bot), with a Retry button and the full error under "Details". The library card shows the same reason.
 - If audio switching misbehaves on a device, open the player with `?mode=variants`; switching then reloads at the current time.
