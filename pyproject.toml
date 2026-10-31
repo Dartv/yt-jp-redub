@@ -8,7 +8,6 @@ license-files = ["LICENSE"]
 requires-python = ">=3.11,<3.12"
 dependencies = [
   "aiohttp>=3.10",
-  "python-dotenv>=1.0",
   "numpy>=1.26,<2.3",
   "soundfile>=0.12",
   "onnx-asr[hub]>=0.7",

@@ -217,17 +217,17 @@ _GOOGLE_NATIVE = re.compile(
 
 
 def normalize_endpoint(base_url: str, model: str) -> tuple[str, str]:
-    """LLM_BASE_URL must be an OpenAI-compatible API root. Two common slips are fixed up instead
+    """base_url must be an OpenAI-compatible API root. Two common slips are fixed up instead
     of failing: a full .../chat/completions URL, and a Google AI Studio native model URL
     (.../models/<model>:generateContent), which maps to that service's OpenAI-compatible root."""
     url = base_url.strip().strip("\"'")
-    if url.upper().startswith("LLM_BASE_URL="):  # the key pasted into its own value
+    if url.upper().startswith("LLM_BASE_URL="):  # a .env line pasted in whole
         url = url.split("=", 1)[1].strip().strip("\"'")
     if not re.match(r"^https?://[^\s/]+", url):
-        raise RuntimeError(f"LLM_BASE_URL is not a URL: {url!r} (expected e.g. http://host/v1)")
+        raise RuntimeError(f"[llm] base_url is not a URL: {url!r} (expected e.g. http://host/v1)")
     if m := _GOOGLE_NATIVE.match(url):
         fixed = f"{m.group(1)}/openai/"
-        log.warning("LLM_BASE_URL is a Gemini-native URL; using %s with model %s instead", fixed, m.group(2))
+        log.warning("base_url is a Gemini-native URL; using %s with model %s instead", fixed, m.group(2))
         return fixed, m.group(2)
     if url.rstrip("/").endswith("/chat/completions"):
         return url.rstrip("/")[: -len("/chat/completions")], model
@@ -401,5 +401,5 @@ class MockTranslator:
 def make_translator(cfg):
     if cfg.translate.backend == "mock":
         return MockTranslator()
-    s = cfg.secrets
-    return OpenAITranslator(s.llm_base_url, s.llm_api_key, s.llm_model, cfg.translate, s.llm_system_prompt)
+    s = cfg.llm
+    return OpenAITranslator(s.base_url, s.api_key, s.model, cfg.translate, s.system_prompt)

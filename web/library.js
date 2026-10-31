@@ -60,7 +60,7 @@ paste.addEventListener("click", async () => {
   urlInput.focus();
 });
 
-// settings: saved into config.toml and .env, editable only on the PC (the server checks too)
+// settings: saved into config.toml, editable only on the PC (the server checks too)
 const settings = document.getElementById("settings"),
   sform = document.getElementById("settingsForm"),
   serror = document.getElementById("settingsError"),

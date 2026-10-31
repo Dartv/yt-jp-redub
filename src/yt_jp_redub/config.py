@@ -1,20 +1,17 @@
-"""Settings: defaults, overridden by config.toml, plus secrets from .env."""
+"""Settings: defaults, overridden by config.toml."""
 
 from __future__ import annotations
 
-import io
 import ipaddress
 import json
 import math
 import os
 import re
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
-
-from dotenv import dotenv_values, load_dotenv
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -28,6 +25,12 @@ DEFAULTS: dict = {
         "low_vram": "auto",
     },
     "storage": {"data_dir": "data", "cap_gb": 50},
+    "llm": {
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "model": "gemma-4-31b-it",
+        "api_key": "",
+        "system_prompt": False,
+    },
     "download": {"max_height": 1080, "cookies_file": ""},
     "asr": {"model": "nemo-parakeet-tdt-0.6b-v2", "device": "cuda", "use_vocals": False},
     "segment": {
@@ -79,22 +82,11 @@ def _ns(d: dict) -> SimpleNamespace:
     return SimpleNamespace(**{k: _ns(v) if isinstance(v, dict) else v for k, v in d.items()})
 
 
-def _bool(s: str | None) -> bool:
-    return (s or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-@dataclass
-class Secrets:
-    llm_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai/"
-    llm_api_key: str = ""
-    llm_model: str = "gemma-4-31b-it"
-    llm_system_prompt: bool = False
-
-
 @dataclass
 class Config:
     server: SimpleNamespace
     storage: SimpleNamespace
+    llm: SimpleNamespace
     download: SimpleNamespace
     asr: SimpleNamespace
     segment: SimpleNamespace
@@ -102,9 +94,7 @@ class Config:
     separate: SimpleNamespace
     tts: SimpleNamespace
     stream: SimpleNamespace
-    secrets: Secrets = field(default_factory=Secrets)
     config_file: Path = ROOT / "config.toml"
-    env_file: Path = ROOT / ".env"
 
     @property
     def data_dir(self) -> Path:
@@ -126,7 +116,6 @@ class Config:
 
 
 def load_config(path: str | Path | None = None, overrides: dict | None = None) -> Config:
-    load_dotenv(ROOT / ".env")
     data = DEFAULTS
     cfg_file = Path(path) if path else ROOT / "config.toml"
     if cfg_file.exists():
@@ -134,14 +123,7 @@ def load_config(path: str | Path | None = None, overrides: dict | None = None) -
             data = _merge(data, tomllib.load(f))
     if overrides:
         data = _merge(data, overrides)
-    env = os.environ
-    secrets = Secrets(
-        llm_base_url=env.get("LLM_BASE_URL") or Secrets.llm_base_url,
-        llm_api_key=env.get("LLM_API_KEY", ""),
-        llm_model=env.get("LLM_MODEL") or Secrets.llm_model,
-        llm_system_prompt=_bool(env.get("LLM_SYSTEM_PROMPT")),
-    )
-    return Config(**{k: _ns(v) for k, v in data.items()}, secrets=secrets, config_file=cfg_file)
+    return Config(**{k: _ns(v) for k, v in data.items()}, config_file=cfg_file)
 
 
 # ---------------------------------------------------------------------------- the settings dialog
@@ -195,11 +177,11 @@ def _file(v):
     return v
 
 
-# what the library's settings dialog edits: name -> (config.toml section, or "env" for .env; key; parser)
+# what the library's settings dialog edits: name -> (config.toml section, key, parser)
 SETTINGS = {
-    "llm_base_url": ("env", "LLM_BASE_URL", _url),
-    "llm_model": ("env", "LLM_MODEL", _text),
-    "llm_api_key": ("env", "LLM_API_KEY", _text),
+    "llm_base_url": ("llm", "base_url", _url),
+    "llm_model": ("llm", "model", _text),
+    "llm_api_key": ("llm", "api_key", _text),
     "max_height": ("download", "max_height", _choice(480, 720, 1080, 1440, 2160)),
     "cookies_file": ("download", "cookies_file", _file),
     "cap_gb": ("storage", "cap_gb", _number(1, 100_000)),
@@ -213,7 +195,7 @@ SETTINGS = {
 
 def _target(cfg: Config, name: str) -> tuple[object, str]:
     section, key, _ = SETTINGS[name]
-    return (cfg.secrets, name) if section == "env" else (getattr(cfg, section), key)
+    return getattr(cfg, section), key
 
 
 def current_settings(cfg: Config) -> dict:
@@ -227,11 +209,7 @@ def current_settings(cfg: Config) -> dict:
 def needs_api_key(cfg: Config) -> bool:
     """No API key yet for a hosted translation provider (a local one, like Ollama, takes none):
     the library then opens the settings with a setup guide."""
-    return (
-        not cfg.secrets.llm_api_key
-        and cfg.translate.backend != "mock"
-        and not local_url(cfg.secrets.llm_base_url)
-    )
+    return not cfg.llm.api_key and cfg.translate.backend != "mock" and not local_url(cfg.llm.base_url)
 
 
 def local_url(url: str) -> bool:
@@ -244,8 +222,8 @@ def local_url(url: str) -> bool:
 
 
 def save_settings(cfg: Config, values: dict) -> list[str]:
-    """Checks the dialog's values, writes the changed ones into config.toml and .env (their comments
-    stay) and applies them to cfg. Returns the changed names; raises BadSetting, writing nothing."""
+    """Checks the dialog's values, writes the changed ones into config.toml (its comments stay) and
+    applies them to cfg. Returns the changed names; raises BadSetting, writing nothing."""
     new = {}
     for name, v in values.items():
         if name not in SETTINGS:
@@ -258,15 +236,10 @@ def save_settings(cfg: Config, values: dict) -> list[str]:
             raise BadSetting(name, str(e)) from None
         if v != getattr(*_target(cfg, name)):
             new[name] = v
-    toml = {SETTINGS[n][:2]: v for n, v in new.items() if SETTINGS[n][0] != "env"}
-    env = {SETTINGS[n][1]: v for n, v in new.items() if SETTINGS[n][0] == "env"}
-    writes = []
-    if toml:  # without a config.toml yet, it starts as the commented example
-        text = _read(cfg.config_file) if cfg.config_file.exists() else _read(ROOT / "config.example.toml")
-        writes.append((cfg.config_file, _toml_set(text, toml)))
-    if env:
-        writes.append((cfg.env_file, _env_set(_read(cfg.env_file) if cfg.env_file.exists() else "", env)))
-    for path, text in writes:
+    if new:  # without a config.toml yet, it starts as the commented example
+        path = cfg.config_file
+        text = _read(path) if path.exists() else _read(ROOT / "config.example.toml")
+        text = _toml_set(text, {SETTINGS[n][:2]: v for n, v in new.items()})
         tmp = path.with_name(path.name + ".tmp")
         tmp.write_bytes(text.encode("utf-8"))
         os.replace(tmp, path)
@@ -309,26 +282,4 @@ def _toml_set(text: str, changes: dict) -> str:
         data = None
     if data is None or any(data[s][k] != v for (s, k), v in changes.items()):
         raise BadSetting("", "config.toml has a layout the settings can't edit; edit it by hand")
-    return out
-
-
-def _env_set(text: str, changes: dict) -> str:
-    eol = "\r\n" if "\r\n" in text else "\n"
-    lines = text.splitlines(keepends=True)
-    if lines and not lines[-1].endswith("\n"):
-        lines[-1] += eol
-    for key, value in changes.items():
-        if re.search(r"[\s#'\"\\]", value):  # quoted, a value is read literally
-            if "'" in value:
-                raise BadSetting(key.lower(), "Can't contain both ' and spaces or quotes")
-            value = f"'{value}'"
-        i = next((i for i, line in enumerate(lines) if re.match(rf"\s*(export\s+)?{key}\s*=", line)), None)
-        if i is None:
-            lines.append(f"{key}={value}{eol}")
-        else:
-            lines[i] = f"{key}={value}{eol}"
-    out = "".join(lines)
-    got = dotenv_values(stream=io.StringIO(out))
-    if any(got.get(k) != v for k, v in changes.items()):
-        raise BadSetting("", ".env has a layout the settings can't edit; edit it by hand")
     return out

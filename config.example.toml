@@ -1,5 +1,5 @@
 # yt-jp-redub settings. Copy to config.toml and edit; every key is optional.
-# Secrets (the LLM API key) go in .env, not here.
+# It holds your translation API key: don't share it.
 
 [server]
 host = "0.0.0.0"          # "127.0.0.1" limits access to this PC only
@@ -30,6 +30,13 @@ max_line_sec = 9.0
 pause_split_sec = 0.5     # a pause this long ends a line
 chunk_sec = 60            # target dub chunk length, split at silences
 first_chunk_sec = 15      # the first chunks are shorter (doubling up to chunk_sec), so playback starts sooner
+
+# the translation provider: any OpenAI-compatible API, including local ones (Ollama, LM Studio)
+[llm]
+base_url = "https://generativelanguage.googleapis.com/v1beta/openai/"
+model = "gemma-4-31b-it"
+api_key = ""              # a local provider takes none
+system_prompt = false     # true if the model accepts system prompts (Gemma on AI Studio doesn't)
 
 [translate]
 backend = "openai"        # "openai" (any OpenAI-compatible API) or "mock"

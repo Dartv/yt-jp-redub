@@ -221,11 +221,11 @@ def test_setup_guide_shows_until_a_hosted_provider_has_a_key():
     from yt_jp_redub.config import load_config, needs_api_key
 
     cfg = load_config("missing.toml")
-    cfg.secrets.llm_api_key, cfg.secrets.llm_base_url = "", "https://api.x.ai/v1"
+    cfg.llm.api_key, cfg.llm.base_url = "", "https://api.x.ai/v1"
     assert needs_api_key(cfg)
-    cfg.secrets.llm_base_url = "http://localhost:11434/v1"  # Ollama takes no key
+    cfg.llm.base_url = "http://localhost:11434/v1"  # Ollama takes no key
     assert not needs_api_key(cfg)
-    cfg.secrets.llm_base_url, cfg.secrets.llm_api_key = "https://api.x.ai/v1", "xai-123"
+    cfg.llm.base_url, cfg.llm.api_key = "https://api.x.ai/v1", "xai-123"
     assert not needs_api_key(cfg)
 
 
@@ -574,11 +574,10 @@ def test_settings_dialog_writes_config_and_env_in_place(tmp_path):
 
     from yt_jp_redub.config import DEFAULTS, ROOT, BadSetting, Config, _ns, current_settings, save_settings
 
-    toml, env = tmp_path / "config.toml", tmp_path / ".env"
+    toml = tmp_path / "config.toml"
     shutil.copy(ROOT / "config.example.toml", toml)
-    env.write_bytes(b"# my keys\r\nLLM_API_KEY=old\r\nLLM_MODEL=a\r\n")
-    cfg = Config(**{k: _ns(v) for k, v in DEFAULTS.items()}, config_file=toml, env_file=env)
-    cfg.secrets.llm_api_key, cfg.secrets.llm_model = "old", "a"
+    cfg = Config(**{k: _ns(v) for k, v in DEFAULTS.items()}, config_file=toml)
+    cfg.llm.api_key = "old"
     before = toml.read_bytes()
 
     with pytest.raises(BadSetting) as e:
@@ -597,7 +596,7 @@ def test_settings_dialog_writes_config_and_env_in_place(tmp_path):
     data = tomllib.loads(text)
     assert data["server"]["port"] == 8790 and data["server"]["low_vram"] is False
     assert data["download"]["max_height"] == 720
-    assert env.read_bytes() == b"# my keys\r\nLLM_API_KEY=old\r\nLLM_MODEL='my model'\r\n"  # the key kept
-    assert cfg.server.port == 8790 and cfg.secrets.llm_model == "my model"
+    assert data["llm"]["model"] == "my model" and data["llm"]["api_key"] == ""  # empty: the key isn't changed
+    assert cfg.server.port == 8790 and cfg.llm.model == "my model" and cfg.llm.api_key == "old"
     assert current_settings(cfg)["llm_api_key"] is True and current_settings(cfg)["low_vram"] == "false"
     assert save_settings(cfg, {"port": 8790}) == []  # unchanged values aren't written

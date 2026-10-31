@@ -40,7 +40,7 @@ sh install.sh
 ```
 
 The installer adds `git`, `ffmpeg` and [`uv`](https://docs.astral.sh/uv/) if they're missing (winget on Windows, Homebrew on macOS, your package manager on Linux), then runs `uv run yt-jp-redub setup`, which:
-- creates `config.toml` and `.env`
+- creates `config.toml`
 - asks for your translation API key (get a free one at <https://aistudio.google.com/apikey>)
 - installs IndexTTS in its own environment under `third_party/`
 - downloads yt-dlp and the IndexTTS-2.5, Parakeet, Demucs and speaker models (several GB)
@@ -122,11 +122,11 @@ Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionar
 
 ## Configuration
 
-The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and `.env` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only. Until an API key is set, the library opens them by itself with a short setup guide.
+The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only. Until an API key is set, the library opens them by itself with a short setup guide.
 
-`config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment, and saving from the library keeps the comments. `.env` holds the secrets.
+`config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment, and saving from the library keeps the comments. It holds your API key, so don't share it.
 
-To use another translation provider, set `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in `.env` for any OpenAI-compatible endpoint, including local ones like Ollama or LM Studio. Set `LLM_SYSTEM_PROMPT=true` if the model accepts system prompts (Gemma on AI Studio doesn't).
+To use another translation provider, set `base_url`, `model` and `api_key` under `[llm]` for any OpenAI-compatible endpoint, including local ones like Ollama or LM Studio. Set `system_prompt = true` if the model accepts system prompts (Gemma on AI Studio doesn't).
 
 Rate limits are set for you on Google AI Studio's free tier and on xAI; for other providers, set `rpm` and `tpm` under `[translate]` if they enforce limits (HTTP 429 answers are retried either way). Thinking models are asked for no reasoning (`reasoning_effort = "none"`), which answered 4 to 10 times faster than "low" and translated as well in a blind comparison.
 

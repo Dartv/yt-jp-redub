@@ -191,17 +191,13 @@ def _setup(cfg, skip_tts: bool) -> int:
     if not ok:
         return 1
 
-    for src, dst in (
-        (ROOT / "config.example.toml", ROOT / "config.toml"),
-        (ROOT / ".env.example", ROOT / ".env"),
-    ):
-        if not dst.exists():
-            shutil.copy(src, dst)
-            print(f"✓ created {dst.name}")
-    if sys.stdin.isatty() and not cfg.secrets.llm_api_key:
+    if not cfg.config_file.exists():
+        shutil.copy(ROOT / "config.example.toml", cfg.config_file)
+        print(f"✓ created {cfg.config_file.name}")
+    if sys.stdin.isatty() and not cfg.llm.api_key:
         print(
             "\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
-            "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later)."
+            "Get one at https://aistudio.google.com/apikey (or leave empty and set it in the library later)."
         )
         try:
             key = input("LLM API key: ").strip()
@@ -210,7 +206,7 @@ def _setup(cfg, skip_tts: bool) -> int:
             print()
         if key:
             save_settings(cfg, {"llm_api_key": key})
-            print("✓ saved to .env")
+            print(f"✓ saved to {cfg.config_file.name}")
 
     if not skip_tts:
         d = cfg.indextts_dir
