@@ -108,6 +108,11 @@ def atomic_write_text(path: Path, text: str) -> None:
             time.sleep(0.05)
 
 
+def file_name(title: str, limit: int) -> str:
+    """A title usable as a file name on every OS (may come out empty)."""
+    return " ".join(re.sub(r'[\x00-\x1f\\/:*?"<>|]', " ", title).split()).strip(".")[:limit]
+
+
 class VideoPaths:
     """File layout of data/videos/<video id>/."""
 
@@ -125,6 +130,8 @@ class VideoPaths:
     subs = property(lambda s: s.root / "subs")
     chunks = property(lambda s: s.root / "chunks")
     hls = property(lambda s: s.root / "hls")
+    video_playlist = property(lambda s: s.hls / "video.m3u8")  # exists once the video is playable
+    vocals_full = property(lambda s: s.root / "vocals_full.wav")  # asr.use_vocals only
     dub_audio = property(lambda s: s.root / "dub.m4a")  # the whole dub as one track, once done
     export = property(lambda s: s.root / "export.mp4")  # offline download, packaged on request
 

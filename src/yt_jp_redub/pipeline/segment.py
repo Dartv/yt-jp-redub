@@ -25,9 +25,7 @@ def sentences(lines: list[Line]) -> list[list[Line]]:
     return out
 
 
-def words_to_lines(
-    words: list[Word], max_chars: int = 90, max_sec: float = 7.0, pause_split: float = 0.5
-) -> list[Line]:
+def words_to_lines(words: list[Word], max_chars: int, max_sec: float, pause_split: float) -> list[Line]:
     lines: list[Line] = []
     cur: list[Word] = []
 
@@ -73,7 +71,7 @@ def words_to_lines(
 
 
 def lines_to_chunks(
-    lines: list[Line], duration: float, chunk_sec: float = 60.0, min_gap: float = 0.3, first_sec: float = 15.0
+    lines: list[Line], duration: float, chunk_sec: float, first_sec: float, min_gap: float = 0.3
 ) -> list[Chunk]:
     """Partitions [0, duration] into chunks whose boundaries fall in gaps between lines. The first
     chunks are shorter (first_sec, doubling up to chunk_sec), so playback from the start can begin
@@ -118,6 +116,4 @@ def build(words: list[Word], duration: float, cfg) -> LinesDoc:
     lines = words_to_lines(words, cfg.max_line_chars, cfg.max_line_sec, cfg.pause_split_sec)
     for l in lines:
         l.end = min(l.end, duration)
-    return LinesDoc(
-        duration, lines, lines_to_chunks(lines, duration, cfg.chunk_sec, first_sec=cfg.first_chunk_sec)
-    )
+    return LinesDoc(duration, lines, lines_to_chunks(lines, duration, cfg.chunk_sec, cfg.first_chunk_sec))

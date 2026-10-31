@@ -4,7 +4,7 @@ so it must not import yt_jp_redub.
 Protocol: one JSON request per line on stdin, one JSON reply per line on the original stdout.
 IndexTTS's own prints are redirected to stderr.
 
-Request:  {"id": 1, "text": "...", "ref": "ref.wav", "emo_ref": "ref.wav" | null, "out": "out.wav",
+Request:  {"id": 1, "text": "...", "ref": "ref.wav", "out": "out.wav",
            "lang": "JA", "duration_factor": 1.0, "emo_alpha": 1.0, "max_mel_tokens": 200 | null,
            "num_beams": 1 | null}
 Reply:    {"id": 1, "ok": true, "sec": 0.83} or {"id": 1, "ok": false, "error": "..."}
@@ -74,7 +74,6 @@ def main():
                 text=req["text"],
                 output_path=req["out"],
                 lang=req.get("lang", "JA"),
-                emo_audio_prompt=req.get("emo_ref"),
                 emo_alpha=float(req.get("emo_alpha", 1.0)),
                 duration_factor=float(req.get("duration_factor", 1.0)),
                 verbose=False,

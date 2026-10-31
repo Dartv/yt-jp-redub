@@ -27,6 +27,7 @@ grid.addEventListener("click", (e) => {
 const urlInput = document.getElementById("url");
 function dub(url) {
   urlInput.value = url;
+  lastLen = url.length; // so the next keystroke isn't taken for another inserted link
   htmx.ajax("POST", "/api/jobs", { values: { url }, swap: "none" });
 }
 // pasting a YouTube video or Twitch VOD/clip link dubs it right away (the server has the exact rules)
@@ -64,10 +65,7 @@ const settings = document.getElementById("settings"),
   sform = document.getElementById("settingsForm"),
   serror = document.getElementById("settingsError"),
   KEY_MASK = "••••••••••••"; // stands for the saved key, which the browser never gets
-document.getElementById("gear").addEventListener("click", async () => {
-  const r = await fetch("/api/settings", { cache: "no-store" }).catch(() => null);
-  if (!r || !r.ok) return alert(r ? await errorText(r) : "The server isn't reachable");
-  const s = await r.json();
+function showSettings(s) {
   for (const el of sform.elements) {
     if (el.name) el.value = el.name === "llm_api_key" ? (s.llm_api_key ? KEY_MASK : "") : s[el.name];
     el.setCustomValidity?.("");
@@ -75,8 +73,32 @@ document.getElementById("gear").addEventListener("click", async () => {
   document.getElementById("fields").disabled = !s.editable;
   document.getElementById("readonly").hidden = s.editable;
   document.getElementById("saveSettings").hidden = !s.editable;
+  // no API key yet: a short guide, and Save asks for the key
+  document.getElementById("welcome").hidden = !s.first_run;
+  document.getElementById("settingsTitle").textContent = s.first_run ? "Get started" : "Settings";
+  sform.elements.llm_api_key.required = s.first_run;
   serror.textContent = "";
   settings.showModal();
+}
+document.getElementById("gear").addEventListener("click", async () => {
+  const r = await fetch("/api/settings", { cache: "no-store" }).catch(() => null);
+  if (!r || !r.ok) return alert(r ? await errorText(r) : "The server isn't reachable");
+  showSettings(await r.json());
+});
+// the first visit (or any visit until an API key is set) opens the settings with the guide
+fetch("/api/settings", { cache: "no-store" })
+  .then((r) => r.json())
+  .then((s) => s.first_run && s.editable && showSettings(s))
+  .catch(() => {});
+const PROVIDERS = {
+  google: ["https://generativelanguage.googleapis.com/v1beta/openai/", "gemma-4-31b-it"],
+  xai: ["https://api.x.ai/v1", "grok-4.3"],
+};
+document.getElementById("welcome").addEventListener("click", (e) => {
+  const p = PROVIDERS[e.target.dataset.provider];
+  if (!p) return;
+  [sform.elements.llm_base_url.value, sform.elements.llm_model.value] = p;
+  sform.elements.llm_api_key.focus();
 });
 sform.addEventListener("input", (e) => e.target.setCustomValidity?.(""));
 // typing a new key replaces the mask rather than adding to it

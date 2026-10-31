@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from . import Worker
+
 # each stage as the viewer reads it
 STAGE_LABELS = {
     "queued": "Queued",
@@ -14,7 +19,7 @@ STAGE_LABELS = {
 }
 
 
-def job_status(w, video_id: str) -> dict | None:
+def job_status(w: Worker, video_id: str) -> dict | None:
     job = w.db.get_job(video_id)
     if not job:
         return None
@@ -54,7 +59,7 @@ def job_status(w, video_id: str) -> dict | None:
         if doc
         else [],
         "subs_complete": doc is not None and job["translated"] >= job["total_lines"],
-        "ready": doc is not None and (w.paths(video_id).hls / "video.m3u8").exists(),
+        "ready": w.ready(video_id),
         "position": pending.index(video_id) if video_id in pending else None,
         "last_watched_at": job["last_watched_at"],
         "resume_at": job["resume_at"],
@@ -70,7 +75,7 @@ ERROR_HINTS = (
     (
         "translation api",
         "The translation service refused the request",
-        "Check LLM_API_KEY and LLM_BASE_URL in .env, then retry.",
+        "Check the API key and provider in the library's settings, then retry.",
     ),
     ("translation failed", "The translation service kept failing", "Retry in a few minutes."),
     (

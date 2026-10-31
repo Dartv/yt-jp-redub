@@ -7,10 +7,14 @@ import logging
 import math
 import random
 import time
+from typing import TYPE_CHECKING
 
 from ..models import Line, LinesDoc, VideoPaths
 from ..pipeline import subs
 from ..pipeline.translate import Request, Retryable, char_budgets
+
+if TYPE_CHECKING:
+    from . import Worker
 
 log = logging.getLogger(__name__)
 HEAD_BATCH = 12  # chunks about to be watched go out in small batches: latency follows output length
@@ -19,7 +23,7 @@ RETRY_CAP = 60
 GLOSSARY_LINES = 120  # transcript lines the glossary is drawn from
 
 
-async def _glossary(w, title: str, doc: LinesDoc) -> dict[str, str]:
+async def _glossary(w: Worker, title: str, doc: LinesDoc) -> dict[str, str]:
     """Names for every batch to agree on: from the start of the transcript and a sample of
     the rest. Without it batches translate on their own (a failure here never stops a job)."""
     lines = doc.lines[: GLOSSARY_LINES // 2]
@@ -32,7 +36,7 @@ async def _glossary(w, title: str, doc: LinesDoc) -> dict[str, str]:
         return {}
 
 
-async def translate_video(w, vid: str, doc: LinesDoc) -> None:
+async def translate_video(w: Worker, vid: str, doc: LinesDoc) -> None:
     """Fills line.ja for every line, saving lines.json and the subtitle files after each batch.
     The chunks about to be watched go out right away; the rest wait for the glossary."""
     if all(l.ja for l in doc.lines):  # resumed after translation finished: no glossary call either

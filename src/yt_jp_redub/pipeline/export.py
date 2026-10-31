@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import soundfile as sf
 
 from ..models import LinesDoc, VideoPaths
@@ -24,7 +23,7 @@ def concat_dub(paths: VideoPaths, doc: LinesDoc, out: Path) -> None:
         for c in doc.chunks:
             data = ff.decode_pcm(paths.seg("ja", c.id))[AAC_PRIMING:]
             want = round(c.end * ff.SR) - round(c.start * ff.SR)
-            f.write(data[:want] if len(data) >= want else np.pad(data, ((0, want - len(data)), (0, 0))))
+            f.write(ff.fit_len(data, want))
 
 
 def write_dub_track(paths: VideoPaths, doc: LinesDoc) -> Path:

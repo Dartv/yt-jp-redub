@@ -44,6 +44,11 @@ def probe(path: Path) -> dict:
     return json.loads(p.stdout)
 
 
+def stream(path: Path, kind: str) -> dict | None:
+    """The first "video" or "audio" stream ffprobe finds in path."""
+    return next((s for s in probe(path)["streams"] if s["codec_type"] == kind), None)
+
+
 def duration(path: Path) -> float:
     return float(probe(path)["format"]["duration"])
 
@@ -86,6 +91,11 @@ def decode_pcm(path: Path, sr: int = SR, channels: int = 2) -> np.ndarray:
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg could not decode {path}: {p.stderr.decode(errors='replace')[-500:]}")
     return np.frombuffer(p.stdout, dtype=np.float32).reshape(-1, channels)
+
+
+def fit_len(x: np.ndarray, n: int) -> np.ndarray:
+    """x cut or padded with silence to n frames."""
+    return x[:n] if len(x) >= n else np.pad(x, ((0, n - len(x)), (0, 0)))
 
 
 def write_wav(path: Path, data: np.ndarray, sr: int) -> None:

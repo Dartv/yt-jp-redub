@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 import aiohttp
 
+from ..config import local_url
 from ..models import Line
 from .pace import char_range, spoken_len
 from .segment import continues, sentences
@@ -235,10 +236,8 @@ def normalize_endpoint(base_url: str, model: str) -> tuple[str, str]:
 
 class OpenAITranslator:
     def __init__(self, base_url: str, api_key: str, model: str, cfg, system_prompt: bool = False):
-        if not api_key:
-            raise RuntimeError(
-                'LLM_API_KEY is not set (see .env.example), or set translate.backend = "mock".'
-            )
+        if not api_key and not local_url(base_url):
+            raise RuntimeError("No translation API key: set one in the library's settings")
         base_url, model = normalize_endpoint(base_url, model)
         self.url = base_url.rstrip("/") + "/chat/completions"
         self.key, self.model, self.cfg, self.system_prompt = api_key, model, cfg, system_prompt
@@ -276,7 +275,7 @@ class OpenAITranslator:
                 async with self._session.post(
                     self.url,
                     json=body,
-                    headers={"Authorization": f"Bearer {self.key}"},
+                    headers={"Authorization": f"Bearer {self.key}"} if self.key else {},
                     timeout=aiohttp.ClientTimeout(total=timeout),
                 ) as r:
                     status, text = r.status, await r.text()
@@ -346,7 +345,7 @@ class OpenAITranslator:
         )
         try:
             redo = _line_texts(await self._chat(INSTRUCTIONS, prompt, self._effort, req.timeout, req.urgent))
-        except Retryable as e:
+        except Exception as e:  # the first translation stands
             log.info("rewording %d lines to fit failed: %s", len(off), str(e)[:200])
             return ja
         for sentence in misfits:

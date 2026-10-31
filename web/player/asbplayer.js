@@ -1,5 +1,6 @@
 import { $, video } from "./dom.js";
 import { media, status, vid } from "./job.js";
+import { JSON_TYPE } from "../common.js";
 
 // asbplayer, the subtitle reader. PC: the server pushes subtitles over asbplayer's WebSocket client;
 // the button (shown once the subtitles are complete) re-sends them. Android: asbplayer discovers
@@ -44,7 +45,7 @@ export function setupAsbplayer() {
   $("asbBtn").onclick = async () => {
     let clients = 0;
     try {
-      const r = await fetch(`/api/jobs/${vid}/asbplayer`, { method: "POST" });
+      const r = await fetch(`/api/jobs/${vid}/asbplayer`, { method: "POST", headers: JSON_TYPE });
       if (r.ok) ({ clients } = await r.json());
     } catch (e) {}
     $("asbBtn").textContent = clients ? "Sent to asbplayer ✓" : "asbplayer isn't connected";

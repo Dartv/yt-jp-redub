@@ -1,6 +1,6 @@
 // Shared by the library and the player.
-export const DL_ICON =
-  '<svg viewBox="0 0 24 24"><path d="M11 4h2v8.2l3.3-3.3 1.4 1.4L12 16l-5.7-5.7 1.4-1.4 3.3 3.3zM5 18h14v2H5z"/></svg>';
+// the server takes posts only as JSON (or from htmx), so a cross-site form can't make them
+export const JSON_TYPE = { "Content-Type": "application/json" };
 
 /** Seconds as h:mm:ss or m:ss. */
 export function fmt(s) {

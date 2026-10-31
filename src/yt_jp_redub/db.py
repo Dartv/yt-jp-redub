@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS chunks (
   done INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (video_id, idx)
 );
-DROP TABLE IF EXISTS notify;
 """
 
 

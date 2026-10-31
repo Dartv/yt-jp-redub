@@ -17,9 +17,9 @@ from . import ff
 AAC_PRIMING = 1024  # samples the ffmpeg AAC encoder prepends
 
 
-def prepare_video(paths: VideoPaths, seg_sec: int = 6) -> None:
+def prepare_video(paths: VideoPaths, seg_sec: int) -> None:
     vdir = paths.hls / "video"
-    playlist = paths.hls / "video.m3u8"
+    playlist = paths.video_playlist
     if playlist.exists():
         return
     vdir.mkdir(parents=True, exist_ok=True)
@@ -129,7 +129,7 @@ def _avc_codec(stream: dict) -> str:
 
 
 def master_playlist(paths: VideoPaths, langs: tuple[str, ...] = ("ja", "en")) -> str:
-    v = next(s for s in ff.probe(paths.video)["streams"] if s["codec_type"] == "video")
+    v = ff.stream(paths.video, "video")
     codecs = f"{_avc_codec(v)},mp4a.40.2" if v.get("codec_name") == "h264" else "mp4a.40.2"
     names = {"ja": "日本語", "en": "English"}
     out = ["#EXTM3U", "#EXT-X-VERSION:7", "#EXT-X-INDEPENDENT-SEGMENTS"]

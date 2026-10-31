@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import logging
 import math
-import re
 import time
 from urllib.parse import quote
 
 from aiohttp import web
 
 from .. import qr
-from ..config import ROOT, BadSetting, Config, current_settings, save_settings
-from ..models import VID_RE, is_youtube
+from ..config import ROOT, BadSetting, Config, current_settings, needs_api_key, save_settings
+from ..models import VID_RE, file_name, is_youtube
 from ..net import public_base
 from ..pipeline import hls
 from ..worker import Worker
@@ -28,16 +28,43 @@ def attachment(title: str, vid: str, ext: str = ".mp4") -> str:
     """Content-Disposition for an offline file: the video's title (UTF-8, for browsers that take
     filename*), with the plain video id as the fallback name. The .mp4 and its .ja.srt/.en.srt
     share the name, so they sit together on the phone."""
-    name = " ".join(re.sub(r'[\x00-\x1f\\/:*?"<>|]', " ", title).split()).strip(".")[:150] or vid
+    name = file_name(title, 150) or vid
     return f"attachment; filename=\"{vid}{ext}\"; filename*=UTF-8''{quote(name + ' [JA dub]' + ext)}"
 
 
+def own_host(host: str | None, public_host: str) -> bool:
+    """Reached by an IP address, localhost or the configured public_host: not through a website's own
+    domain name pointed at this PC (DNS rebinding), which would make that website same-origin."""
+    if host in ("localhost", public_host or "localhost"):
+        return True
+    try:
+        ipaddress.ip_address((host or "").strip("[]"))
+        return True
+    except ValueError:
+        return False
+
+
 def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
-    app = web.Application()
+    @web.middleware
+    async def guard(req, handler):
+        if not own_host(req.url.host, cfg.server.public_host):
+            raise web.HTTPForbidden(text="Open yt-jp-redub by its IP address or localhost")
+        # a cross-site <form> can post neither JSON nor htmx's header: so it can't queue, retry or seek
+        if (
+            req.method == "POST"
+            and req.content_type != "application/json"
+            and "HX-Request" not in req.headers
+        ):
+            raise web.HTTPUnsupportedMediaType(text="expected JSON")
+        return await handler(req)
+
+    app = web.Application(middlewares=[guard])
     r = app.router
 
+    port = cfg.server.port  # the one it listens on: a new one from the settings waits for a restart
+
     def base() -> str:
-        return public_base(cfg)
+        return public_base(cfg, port)
 
     def link(vid: str) -> str:
         return f"{base()}/watch/{vid}"
@@ -177,7 +204,10 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         return req.remote in here and req.url.host in here | {"localhost"} and own
 
     async def api_settings(req):
-        return web.json_response({**current_settings(cfg), "editable": on_this_pc(req)}, headers=NO_STORE)
+        return web.json_response(
+            {**current_settings(cfg), "editable": on_this_pc(req), "first_run": needs_api_key(cfg)},
+            headers=NO_STORE,
+        )
 
     async def api_save_settings(req):
         if not on_this_pc(req):
@@ -221,7 +251,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
 
     async def master(req):
         vid, paths = media_paths(req)
-        if not (paths.hls / "video.m3u8").exists() or worker.doc(vid) is None:
+        if not worker.ready(vid):
             raise web.HTTPServiceUnavailable(text="not ready", headers={"Retry-After": "3"})
         audio = req.query.get("audio")
         langs = (audio,) if audio in ("ja", "en") else ("ja", "en")
@@ -230,7 +260,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
 
     async def video_playlist(req):
         _, paths = media_paths(req)
-        p = paths.hls / "video.m3u8"
+        p = paths.video_playlist
         if not p.exists():
             raise web.HTTPServiceUnavailable(headers={"Retry-After": "3"})
         return web.FileResponse(p, headers={"Content-Type": "application/vnd.apple.mpegurl", **NO_STORE})
@@ -294,7 +324,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         """The .mp4 for offline viewing, packaged now from the finished streams."""
         vid = req.match_info["vid"]
         job = job_or_404(vid)
-        if job["stage"] != "done" or not worker.status(vid)["ready"]:
+        if job["stage"] != "done" or not worker.ready(vid):
             raise web.HTTPConflict(text="Only a fully dubbed video can be downloaded")
         try:
             path = await worker.offline_file(vid)

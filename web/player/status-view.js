@@ -1,7 +1,7 @@
 import { $, touchUI, video } from "./dom.js";
 import { status, vid } from "./job.js";
 import { overlay } from "./overlay.js";
-import { DL_ICON, downloadOffline, mb, pct } from "../common.js";
+import { JSON_TYPE, downloadOffline, mb, pct } from "../common.js";
 
 // What the page says about the job: the title, the progress line, the download button, and a
 // failure with its retry.
@@ -36,9 +36,7 @@ function renderDownload(s) {
   const b = $("dl");
   b.hidden = s.stage !== "done" || !s.ready;
   if (b.hidden) return;
-  b.innerHTML = DL_ICON + "<span></span>";
-  b.lastChild.textContent = s.download_size ? `Download · ${mb(s.download_size)}` : "Download";
-  b.title = "Saves the video (.mp4) and its Japanese and English subtitles (.srt) to watch offline";
+  b.querySelector("span").textContent = s.download_size ? `Download · ${mb(s.download_size)}` : "Download";
 }
 
 export function setupStatusView() {
@@ -46,7 +44,7 @@ export function setupStatusView() {
   $("ovRetry").onclick = async (e) => {
     e.stopPropagation();
     $("ovRetry").hidden = true;
-    await fetch(`/api/jobs/${vid}/retry`, { method: "POST" }).catch(() => {});
+    await fetch(`/api/jobs/${vid}/retry`, { method: "POST", headers: JSON_TYPE }).catch(() => {});
     location.reload();
   };
   // the title opens the original video at the current time; YouTube and Twitch VODs both read t=1h2m3s

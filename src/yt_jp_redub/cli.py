@@ -16,7 +16,7 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
-from .config import ROOT, load_config
+from .config import ROOT, load_config, save_settings
 
 log = logging.getLogger("yt_jp_redub")
 INDEXTTS_REPO = "https://github.com/index-tts/index-tts.git"
@@ -74,7 +74,7 @@ async def _serve(cfg, open_browser: bool = False) -> None:
             ) from None
         runners.append(runner)
 
-    base = public_base(cfg)
+    base = public_base(cfg, cfg.server.port)
     print(
         f"\n  yt-jp-redub is running\n"
         f"  Library:   {base}/\n"
@@ -87,7 +87,7 @@ async def _serve(cfg, open_browser: bool = False) -> None:
     if open_browser:
         webbrowser.open(f"http://127.0.0.1:{cfg.server.port}/")
 
-    await asyncio.to_thread(public_base, cfg)  # warm the LAN IP cache off the event loop
+    await asyncio.to_thread(public_base, cfg, cfg.server.port)  # warm the LAN IP cache off the event loop
     if await asyncio.to_thread(lambda: worker.models.low_vram):
         log.info("Low-VRAM mode: transcription's and the dub's models take turns on the GPU")
     loop = asyncio.get_running_loop()
@@ -198,9 +198,7 @@ def _setup(cfg, skip_tts: bool) -> int:
         if not dst.exists():
             shutil.copy(src, dst)
             print(f"✓ created {dst.name}")
-    env_path = ROOT / ".env"
-    env = env_path.read_text(encoding="utf-8")
-    if sys.stdin.isatty() and ("LLM_API_KEY=\n" in env or env.rstrip().endswith("LLM_API_KEY=")):
+    if sys.stdin.isatty() and not cfg.secrets.llm_api_key:
         print(
             "\nTranslation needs an API key. Default: Gemma on Google AI Studio's free tier.\n"
             "Get one at https://aistudio.google.com/apikey (or leave empty and edit .env later)."
@@ -211,7 +209,7 @@ def _setup(cfg, skip_tts: bool) -> int:
             key = ""
             print()
         if key:
-            env_path.write_text(env.replace("LLM_API_KEY=", f"LLM_API_KEY={key}", 1), encoding="utf-8")
+            save_settings(cfg, {"llm_api_key": key})
             print("✓ saved to .env")
 
     if not skip_tts:

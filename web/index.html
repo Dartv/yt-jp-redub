@@ -79,6 +79,23 @@
         <h2 id="settingsTitle">Settings</h2>
         <p class="note" id="readonly" hidden>You can change these on the PC that runs yt-jp-redub.</p>
         <fieldset id="fields">
+          <div class="welcome" id="welcome" hidden>
+            <p>Welcome! One step before your first dub: the translation runs through an AI provider, which
+              needs an API key.</p>
+            <ol>
+              <li>
+                Pick one: <button type="button" data-provider="google">Google AI Studio</button> is free but
+                slow to start; <button type="button" data-provider="xai">xAI Grok</button> is paid and starts
+                in under a minute.
+              </li>
+              <li>
+                Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
+                  >aistudio.google.com/apikey</a
+                > or <a href="https://console.x.ai" target="_blank" rel="noopener">console.x.ai</a>.
+              </li>
+              <li>Paste it into API key below, press Save, then paste a YouTube or Twitch link.</li>
+            </ol>
+          </div>
           <h3>Translation</h3>
           <label
             ><span>Provider<small>Any OpenAI-compatible API address</small></span>

@@ -26,14 +26,7 @@ def _venv_python(project: Path) -> Path:
 
 
 class IndexTTSClient:
-    def __init__(
-        self,
-        indextts_dir: Path,
-        lang: str = "JA",
-        use_bf16: bool = True,
-        emo_alpha: float = 1.0,
-        num_beams: int = 1,
-    ):
+    def __init__(self, indextts_dir: Path, lang: str, use_bf16: bool, emo_alpha: float, num_beams: int):
         self.lang, self.emo_alpha, self.num_beams = lang, emo_alpha, num_beams
         py = _venv_python(indextts_dir)
         if not py.exists():
@@ -78,15 +71,12 @@ class IndexTTSClient:
             )
         return json.loads(line)
 
-    def synth(
-        self, text: str, ref: Path, out: Path, duration_factor: float = 1.0, emo_ref: Path | None = None
-    ) -> None:
+    def synth(self, text: str, ref: Path, out: Path, duration_factor: float) -> None:
         req = {
             "id": next(self._ids),
             "text": text,
             "ref": str(ref.resolve()),
             "out": str(out.resolve()),
-            "emo_ref": str(emo_ref.resolve()) if emo_ref else None,
             "lang": self.lang,
             "duration_factor": round(float(duration_factor), 3),
             "max_mel_tokens": int(MEL_TOKENS_PER_SEC * max_speech_sec(text)),
@@ -115,9 +105,7 @@ class IndexTTSClient:
 class MockTTS:
     """Speech-like placeholder audio (~0.14 s per character), for testing without a GPU."""
 
-    def synth(
-        self, text: str, ref: Path, out: Path, duration_factor: float = 1.0, emo_ref: Path | None = None
-    ) -> None:
+    def synth(self, text: str, ref: Path, out: Path, duration_factor: float) -> None:
         from .ff import write_wav
 
         time.sleep(float(os.environ.get("YTJP_MOCK_TTS_DELAY", "0")))  # simulate a slow GPU in tests

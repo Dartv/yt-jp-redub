@@ -79,6 +79,11 @@ def _same_speaker(embs: Embeddings, a: int, b: int, sim: float) -> bool:
     return a in embs and b in embs and float(embs[a] @ embs[b]) >= sim
 
 
+def _other_speaker(embs: Embeddings, a: int, b: int, sim: float) -> bool:
+    """Clearly different voices (unknown when either line has no embedding)."""
+    return a in embs and b in embs and not _same_speaker(embs, a, b, sim)
+
+
 def group_utterances(lines: list[Line], embs: Embeddings, cfg) -> list[Utterance]:
     """Merges adjacent lines into one take: the lines of one sentence (Japanese word order moves words
     between them, so only the whole sentence fits its time), and lines of one speaker when the gap
@@ -91,7 +96,7 @@ def group_utterances(lines: list[Line], embs: Embeddings, cfg) -> list[Utterance
         prev, a, b = out[-1], out[-1].lines[-1], u.lines[0]
         gap = u.start - prev.end
         # ASR often drops the full stop after an exclamation: a "continuation" in another voice isn't one
-        other = a.id in embs and b.id in embs and not _same_speaker(embs, a.id, b.id, cfg.speaker_sim)
+        other = _other_speaker(embs, a.id, b.id, cfg.speaker_sim)
         sentence = continues(a) and gap <= SENTENCE_GAP and not other
         same = (
             gap <= cfg.group_gap_sec
@@ -199,7 +204,7 @@ def _separate(paths: VideoPaths, chunk: Chunk, separator, sr: int, n: int) -> tu
         vocals, background = v[off : off + n], b[off : off + n]
         ff.write_wav(vpath, vocals, sr)
         ff.write_wav(bpath, background, sr)
-    return _pad_to(vocals, n), _pad_to(background, n)
+    return ff.fit_len(vocals, n), ff.fit_len(background, n)
 
 
 def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cfg, pace: PaceModel) -> Path:
@@ -264,7 +269,7 @@ def _lay_out(
 
     def other_speaker(k: int) -> bool:  # takes k-1 and k are clearly different voices
         a, b = utts[k - 1].lines[-1].id, utts[k].lines[0].id
-        return a in embs and b in embs and not _same_speaker(embs, a, b, cfg.speaker_sim)
+        return _other_speaker(embs, a, b, cfg.speaker_sim)
 
     voice = np.zeros((n, 1), dtype=np.float32)
     cursor = 0.0
@@ -396,9 +401,3 @@ def _synth(tts, u: Utterance, ref: Path, out: Path, factor: float, force: bool =
         factor = float(meta.read_text())
     wav, tsr = sf.read(str(out), dtype="float32", always_2d=True)
     return _trim_silence(wav.mean(axis=1, keepdims=True), tsr), tsr, factor
-
-
-def _pad_to(x: np.ndarray, n: int) -> np.ndarray:
-    if len(x) >= n:
-        return x[:n]
-    return np.pad(x, ((0, n - len(x)), (0, 0)))

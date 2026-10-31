@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import ipaddress
 import json
 import math
 import os
@@ -11,6 +12,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlsplit
 
 from dotenv import dotenv_values, load_dotenv
 
@@ -220,6 +222,25 @@ def current_settings(cfg: Config) -> dict:
     out["llm_api_key"] = bool(out["llm_api_key"])
     out["low_vram"] = str(out["low_vram"]).lower()
     return out
+
+
+def needs_api_key(cfg: Config) -> bool:
+    """No API key yet for a hosted translation provider (a local one, like Ollama, takes none):
+    the library then opens the settings with a setup guide."""
+    return (
+        not cfg.secrets.llm_api_key
+        and cfg.translate.backend != "mock"
+        and not local_url(cfg.secrets.llm_base_url)
+    )
+
+
+def local_url(url: str) -> bool:
+    """On this PC or the home network (Ollama, LM Studio)."""
+    host = urlsplit(url.strip()).hostname or ""
+    try:
+        return host == "localhost" or ipaddress.ip_address(host).is_private
+    except ValueError:
+        return False
 
 
 def save_settings(cfg: Config, values: dict) -> list[str]:

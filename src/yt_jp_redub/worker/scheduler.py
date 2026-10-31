@@ -9,7 +9,7 @@ REQUEST_TTL = 60  # a segment request is a priority hint for this long
 
 
 class ChunkScheduler:
-    def __init__(self, lookahead: int = 3):
+    def __init__(self, lookahead: int):
         self.lookahead = lookahead
         self.playhead: dict[str, tuple[int, float]] = {}  # video_id -> (chunk, when)
         self.requests: dict[str, dict[int, float]] = {}  # video_id -> {chunk: when}

@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
+from pathlib import Path
 
 import numpy as np
+import soundfile as sf
+
+from . import ff
 
 log = logging.getLogger(__name__)
 
 
 class DemucsSeparator:
-    def __init__(self, model: str = "htdemucs", device: str = "cuda"):
+    def __init__(self, model: str, device: str):
         import torch
         from demucs.pretrained import get_model
 
@@ -47,13 +52,14 @@ class DemucsSeparator:
                 progress=False,
             )[0]
             out = (out * std + mean).cpu().numpy()  # (sources, channels, frames)
-            if self.device.startswith("cuda"):  # its ~0.8 GB of scratch memory goes to IndexTTS until the next chunk
+            # its ~0.8 GB of scratch memory goes to IndexTTS until the next chunk
+            if self.device.startswith("cuda"):
                 torch.cuda.empty_cache()
         vocals = out[self.vocals_idx].T
         background = out.sum(0).T - vocals
         vocals, background = resample(vocals, self.sr, sr), resample(background, self.sr, sr)
         n = len(audio)
-        return _fit(vocals, n), _fit(background, n)
+        return ff.fit_len(vocals, n).astype(np.float32), ff.fit_len(background, n).astype(np.float32)
 
 
 class MockSeparator:
@@ -61,10 +67,14 @@ class MockSeparator:
         return audio.copy(), audio * 0.15
 
 
-def _fit(x: np.ndarray, n: int) -> np.ndarray:
-    if len(x) >= n:
-        return x[:n].astype(np.float32)
-    return np.pad(x, ((0, n - len(x)), (0, 0))).astype(np.float32)
+def separate_full(separator, wav: Path, out: Path) -> None:
+    """The vocals of a whole recording, for ASR (asr.use_vocals), separated two minutes at a time."""
+    total, part = ff.duration(wav), out.with_suffix(".part.wav")
+    with sf.SoundFile(str(part), "w", samplerate=ff.SR, channels=2, subtype="PCM_16") as f:
+        for t in range(0, math.ceil(total), 120):
+            data, sr = ff.read_slice(wav, t, min(total, t + 120))
+            f.write(np.clip(separator.separate(data, sr)[0], -1, 1))
+    part.replace(out)  # a crash midway leaves no short file to be taken for the whole
 
 
 def make_separator(cfg):

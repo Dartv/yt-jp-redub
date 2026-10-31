@@ -17,6 +17,8 @@ import uuid
 
 from aiohttp import WSMsgType, web
 
+from ..models import file_name
+
 log = logging.getLogger(__name__)
 WATCH_TTL = 30  # seconds since the last playhead report for a page to count as open
 
@@ -35,6 +37,11 @@ class AsbplayerBridge:
         return app
 
     async def handle(self, req: web.Request) -> web.WebSocketResponse:
+        # asbplayer connects from its extension; any web page open in the browser could too, and read
+        # the subtitles and titles of what is being watched
+        origin = req.headers.get("Origin", "")
+        if origin.startswith(("http://", "https://")) and origin != "https://app.asbplayer.dev":
+            raise web.HTTPForbidden()
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(req)
         self.clients[ws] = set()
@@ -81,7 +88,7 @@ class AsbplayerBridge:
         paths = self.worker.paths(vid)
         files = []
         title = (self.worker.db.get_job(vid) or {}).get("title") or vid
-        safe = "".join(ch for ch in title if ch not in '\\/:*?"<>|')[:80]
+        safe = file_name(title, 80) or vid
         for lang in ("ja", "en"):
             p = paths.subs / f"{lang}.srt"
             if p.exists():

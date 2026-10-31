@@ -63,24 +63,24 @@ def _words(text, start=0.0, step=0.3, pause_after=()):
 
 def test_lines_split_on_sentences_and_pauses():
     lines = words_to_lines(
-        _words("Yes, sir. I'd like an argument please. Mr. Smith is free", pause_after={6})
+        _words("Yes, sir. I'd like an argument please. Mr. Smith is free", pause_after={6}), 120, 9.0, 0.5
     )
     assert [l.en for l in lines] == ["Yes, sir.", "I'd like an argument please.", "Mr. Smith is free"]
 
 
 def test_short_replies_are_own_lines():
-    lines = words_to_lines(_words("No, you didn't. Yes, I did. No. Yes."))
+    lines = words_to_lines(_words("No, you didn't. Yes, I did. No. Yes."), 120, 9.0, 0.5)
     assert [l.en for l in lines] == ["No, you didn't.", "Yes, I did.", "No.", "Yes."]
 
 
 def test_long_line_splits():
-    lines = words_to_lines(_words(" ".join(["word"] * 60)), max_chars=50, max_sec=100)
+    lines = words_to_lines(_words(" ".join(["word"] * 60)), max_chars=50, max_sec=100, pause_split=0.5)
     assert all(len(l.en) <= 55 for l in lines)
 
 
 def test_chunks_tile_timeline():
     lines = [Line(i, i * 5.0, i * 5.0 + 4.0, f"line {i}") for i in range(40)]
-    chunks = lines_to_chunks(lines, 205.0, chunk_sec=60)
+    chunks = lines_to_chunks(lines, 205.0, chunk_sec=60, first_sec=15)
     assert chunks[0].start == 0 and chunks[-1].end == 205.0
     for a, b in itertools.pairwise(chunks):
         assert a.end == b.start
@@ -98,7 +98,7 @@ def test_first_chunks_are_short():
 
 
 def test_chunks_no_speech():
-    chunks = lines_to_chunks([], 30.0)
+    chunks = lines_to_chunks([], 30.0, chunk_sec=60, first_sec=15)
     assert len(chunks) == 1 and chunks[0].end == 30.0
 
 
@@ -215,6 +215,26 @@ def test_reword_only_lines_well_outside_their_range():
     assert req.misfit([line], {0: "まず武器を手に入れる"}) == 0  # 10 chars: a little long, the dub speeds up
     assert req.misfit([line], {0: "まず武器を手に入れるんだぜ"}) > 0
     assert req.misfit([line], {0: "武器"}) > 0  # too short: part of the line is missing
+
+
+def test_setup_guide_shows_until_a_hosted_provider_has_a_key():
+    from yt_jp_redub.config import load_config, needs_api_key
+
+    cfg = load_config("missing.toml")
+    cfg.secrets.llm_api_key, cfg.secrets.llm_base_url = "", "https://api.x.ai/v1"
+    assert needs_api_key(cfg)
+    cfg.secrets.llm_base_url = "http://localhost:11434/v1"  # Ollama takes no key
+    assert not needs_api_key(cfg)
+    cfg.secrets.llm_base_url, cfg.secrets.llm_api_key = "https://api.x.ai/v1", "xai-123"
+    assert not needs_api_key(cfg)
+
+
+def test_server_answers_only_its_own_host_names():
+    from yt_jp_redub.server.app import own_host
+
+    assert own_host("127.0.0.1", "") and own_host("192.168.31.207", "") and own_host("::1", "")
+    assert own_host("localhost", "") and own_host("mypc.local", "mypc.local")
+    assert not own_host("evil.example", "") and not own_host("", "") and not own_host(None, "")
 
 
 def test_error_hints():

@@ -1,4 +1,4 @@
-import { $, ICON, video } from "./dom.js";
+import { $, video } from "./dom.js";
 import { hideControlsSoon, holdControlsWhile, showControls } from "./controls.js";
 import { prefs, savePrefs } from "./prefs.js";
 
@@ -33,7 +33,6 @@ function toggleMenu(open = !menuOpen()) {
 
 export function setupMenu() {
   holdControlsWhile(menuOpen);
-  $("setBtn").innerHTML = ICON.gear;
   $("setBtn").onclick = (e) => {
     e.stopPropagation();
     toggleMenu();

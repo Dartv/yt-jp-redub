@@ -122,7 +122,7 @@ Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionar
 
 ## Configuration
 
-The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and `.env` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only.
+The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and `.env` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only. Until an API key is set, the library opens them by itself with a short setup guide.
 
 `config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment, and saving from the library keeps the comments. `.env` holds the secrets.
 

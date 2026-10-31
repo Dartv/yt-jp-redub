@@ -135,8 +135,8 @@ def _discover() -> str:
     return ip if ip and _private(ip) else "127.0.0.1"
 
 
-def public_base(cfg) -> str:
+def public_base(cfg, port: int) -> str:
     host = cfg.server.public_host or (
         "127.0.0.1" if cfg.server.host in ("127.0.0.1", "localhost") else lan_ip()
     )
-    return f"http://{host}:{cfg.server.port}"
+    return f"http://{host}:{port}"
