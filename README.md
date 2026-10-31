@@ -5,7 +5,7 @@ Dub YouTube videos, Twitch VODs and Twitch clips into Japanese, so you can pract
 - Each speaker keeps their own voice and tone. [IndexTTS-2.5](https://github.com/index-tts/index-tts) voices every line, using that speaker's original audio as the reference.
 - Japanese and English subtitles that [Yomitan](https://github.com/yomidevs/yomitan) can scan and [asbplayer](https://github.com/killergerbah/asbplayer) can load.
 - It streams. Playback starts as soon as the dub can stay ahead of you, usually within a minute with a fast translation API, and seeking ahead moves the dub to where you are.
-- Translation goes through any OpenAI-compatible API;
+- Translation goes through any OpenAI-compatible API.
 - Watch on the PC, or on your phone over the same Wi-Fi.
 
 ## Requirements
