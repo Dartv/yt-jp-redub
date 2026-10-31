@@ -11,6 +11,7 @@ from yt_jp_redub.pipeline import hls, subs
 from yt_jp_redub.pipeline.asr import tokens_to_words
 from yt_jp_redub.pipeline.segment import lines_to_chunks, words_to_lines
 from yt_jp_redub.pipeline.speakable import speakable
+from yt_jp_redub.pipeline.translate import Request
 from yt_jp_redub.server.cards import cards_html
 from yt_jp_redub.worker.eta import DubClock
 from yt_jp_redub.worker.scheduler import ChunkScheduler
@@ -206,6 +207,14 @@ def test_library_cards_escape_titles_and_say_where_each_video_is():
     )
     assert "Failed · The video is private" in failed and 'hx-post="/api/jobs/abcdefghijk/retry"' in failed
     assert "Paste a YouTube" in cards_html([])
+
+
+def test_reword_only_lines_well_outside_their_range():
+    line = Line(id=0, start=0.0, end=1.6, en="Step one: get a weapon.")
+    req = Request([line], budgets={0: (5, 8)})
+    assert req.misfit([line], {0: "まず武器を手に入れる"}) == 0  # 10 chars: a little long, the dub speeds up
+    assert req.misfit([line], {0: "まず武器を手に入れるんだぜ"}) > 0
+    assert req.misfit([line], {0: "武器"}) > 0  # too short: part of the line is missing
 
 
 def test_error_hints():

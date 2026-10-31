@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import re
 import time
 from collections import deque
@@ -32,7 +33,9 @@ talking.
 
 Rules:
 - Meaning first: keep what each line says, including the main point of explanations, rules and
-  instructions. Get key terms right in context (in an argument, "contradiction" is 否定/反論, not 矛盾), and
+  instructions. Never drop content: every part of a line (a condition and its result, a reason, an
+  object) is in its Japanese, so "if it rains tomorrow, we'll have to cancel the trip" keeps both
+  halves. Get key terms right in context (in an argument, "contradiction" is 否定/反論, not 矛盾), and
   use one translation for a recurring key term throughout.
 - The English is an automatic transcript and has mistakes: misheard words, names and phrases. Work out
   what was really said from the context and the video title, and translate that, never the garble.
@@ -43,7 +46,8 @@ Rules:
 - The dub has to fit the original timing. Each line comes with "chars": the range of Japanese characters
   (kana/kanji, not counting punctuation) that can be spoken in the time the English line takes. Stay inside
   it: use the room for complete, natural spoken phrasing (a line far below the range leaves the voice
-  dragging or silent), and paraphrase or drop filler when it's tight.
+  dragging or silent, and usually means part of the line was left out), and paraphrase or drop filler
+  when it's tight. A complete line a little over its range is better than one missing part of its point.
 - Lines often alternate between speakers (one says "Yes, I did", the next "No, you didn't"). Work out who
   says what from the content and keep each speaker's side, polarity and register (a polite clerk stays
   polite, an abusive man stays rude).
@@ -103,7 +107,8 @@ class Request:
             return 0
         n = sum(spoken_len(ja[l.id]) for l in sentence)
         lo, hi = (sum(self.budgets[l.id][k] for l in sentence) for k in (0, 1))
-        return max(0, lo - 1 - n, n - hi - 1)
+        # a little long is fine: the dub may speed up more than the range assumes (tts.max_speedup)
+        return max(0, lo - 1 - n, n - math.ceil(hi * 1.1) - 1)
 
 
 def _line_texts(reply: dict) -> dict[int, str]:
@@ -328,8 +333,10 @@ class OpenAITranslator:
             return ja
         prompt = (
             "These translations don't fit their timing. Reword each to land inside its character range,\n"
+            "keeping its register and its place in the sentence. Too short (has_chars below the range): the\n"
+            "translation left out part of what the English says, so put it back; don't pad with filler.\n"
+            "Too long: say all of it more compactly; never cut a line off mid-phrase or drop its point.\n"
         )
-        prompt += "keeping its meaning, register and its place in the sentence:\n"
         prompt += json.dumps(
             {
                 str(l.id): {"en": l.en, "ja": ja[l.id], "has_chars": spoken_len(ja[l.id]), **req.chars(l)}

@@ -44,7 +44,7 @@ function onPictureClick(e) {
   tapTimer = setTimeout(tapPicture, side ? 320 : 0);
 }
 
-// swipe left / right on the picture: next / previous subtitle
+// swipe right / left on the picture: next / previous subtitle (the way a seek bar drags)
 function onTouchStart(e) {
   const onPicture = e.target === video || e.target === stage || $("subs").contains(e.target);
   swipe =
@@ -60,7 +60,7 @@ function onTouchEnd(e) {
   if (Math.abs(dx) > 50 && Math.abs(dx) > 1.5 * Math.abs(dy) && dt < 800) {
     swipedAt = Date.now();
     clearTimeout(tapTimer);
-    seekLine(dx < 0 ? 1 : -1);
+    seekLine(dx > 0 ? 1 : -1);
   }
 }
 
