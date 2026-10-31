@@ -47,7 +47,7 @@ If you'd rather install `git`, `ffmpeg` and `uv` yourself, run `uv run yt-jp-red
 uv run yt-jp-redub serve
 ```
 
-It prints the library address, for example `http://192.168.1.20:8765/`, and a QR code of it. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
+It prints the library address, for example `http://192.168.1.20:8767/`, and a QR code of it. The address is your PC's LAN IP, detected automatically; VPN and virtual adapters are skipped. Set `public_host` in `config.toml` to override it.
 
 On your phone, join the same Wi-Fi and point the camera at the QR code (in the terminal, or at the top right of the library page on the PC). Add the page to your home screen to open it in one tap next time.
 

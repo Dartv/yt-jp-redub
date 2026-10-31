@@ -3,7 +3,7 @@
 
 [server]
 host = "0.0.0.0"          # "127.0.0.1" limits access to this PC only
-port = 8765
+port = 8767               # 8765 is AnkiConnect's, 8766 asbplayer's
 ws_port = 8766            # asbplayer WebSocket client connects here (PC only)
 public_host = ""          # override the auto-discovered LAN IP used in links
 

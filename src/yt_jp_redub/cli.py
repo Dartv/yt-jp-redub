@@ -59,13 +59,19 @@ async def _serve(cfg) -> None:
 
     runners = []
     # asbplayer's WebSocket client runs on this PC only, so its port isn't opened to the network
-    for app, host, port in (
-        (build_app(cfg, worker, asb), cfg.server.host, cfg.server.port),
-        (asb.app(), "127.0.0.1", cfg.server.ws_port),
+    for app, host, port, key in (
+        (build_app(cfg, worker, asb), cfg.server.host, cfg.server.port, "port"),
+        (asb.app(), "127.0.0.1", cfg.server.ws_port, "ws_port"),
     ):
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
-        await web.TCPSite(runner, host, port).start()
+        try:
+            await web.TCPSite(runner, host, port).start()
+        except OSError:
+            raise SystemExit(
+                f"Port {port} is already in use by another program (or yt-jp-redub is already running). "
+                f"Set {key} under [server] in config.toml to a free one."
+            ) from None
         runners.append(runner)
 
     base = public_base(cfg)
