@@ -132,16 +132,16 @@ paste.addEventListener("click", async () => {
 // settings: saved into config.toml and .env, editable only on the PC (the server checks too)
 const settings = document.getElementById("settings"),
   sform = document.getElementById("settingsForm"),
-  serror = document.getElementById("settingsError");
+  serror = document.getElementById("settingsError"),
+  KEY_MASK = "••••••••••••"; // stands for the saved key, which the browser never gets
 document.getElementById("gear").addEventListener("click", async () => {
   const r = await fetch("/api/settings", { cache: "no-store" }).catch(() => null);
   if (!r || !r.ok) return alert(r ? await errorText(r) : "The server isn't reachable");
   const s = await r.json();
   for (const el of sform.elements) {
-    if (el.name) el.value = el.name === "llm_api_key" ? "" : s[el.name];
+    if (el.name) el.value = el.name === "llm_api_key" ? (s.llm_api_key ? KEY_MASK : "") : s[el.name];
     el.setCustomValidity?.("");
   }
-  sform.elements.llm_api_key.placeholder = s.llm_api_key ? "Saved (type a new one to replace it)" : "Not set";
   document.getElementById("fields").disabled = !s.editable;
   document.getElementById("readonly").hidden = s.editable;
   document.getElementById("saveSettings").hidden = !s.editable;
@@ -149,13 +149,17 @@ document.getElementById("gear").addEventListener("click", async () => {
   settings.showModal();
 });
 sform.addEventListener("input", (e) => e.target.setCustomValidity?.(""));
+// typing a new key replaces the mask rather than adding to it
+sform.elements.llm_api_key.addEventListener("focus", (e) => e.target.value === KEY_MASK && e.target.select());
 sform.addEventListener("submit", async (e) => {
   if (e.submitter?.value !== "save") return; // Close (or Escape) just closes it
   e.preventDefault();
+  const values = Object.fromEntries(new FormData(sform));
+  if (values.llm_api_key === KEY_MASK) values.llm_api_key = ""; // empty keeps the saved key
   const r = await fetch("/api/settings", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(Object.fromEntries(new FormData(sform))),
+    body: JSON.stringify(values),
   }).catch(() => null);
   if (!r || !r.ok) {
     const err = r ? await r.clone().json().catch(async () => ({ error: await errorText(r) })) : {};
