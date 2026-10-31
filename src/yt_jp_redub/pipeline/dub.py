@@ -142,6 +142,8 @@ def _trim_silence(wav: np.ndarray, sr: int, below_peak_db: float = 35.0) -> np.n
     if not len(env):
         return wav
     loud = np.where(env > max(-50.0, float(env.max()) - below_peak_db))[0]
+    if not len(loud):  # all quiet: nothing to trim against
+        return wav
     return wav[max(0, loud[0] * hop - int(0.03 * sr)) : (loud[-1] + 1) * hop + int(0.08 * sr)]
 
 

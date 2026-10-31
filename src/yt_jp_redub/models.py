@@ -20,8 +20,6 @@ TWITCH_CLIP_RE = re.compile(
 # than an 11-character YouTube id (VOD numbers have 10 digits, clip slugs are longer still)
 VID_RE = r"[A-Za-z0-9_-]{11}|twitch-[0-9]+|twitchclip-[A-Za-z0-9_-]+"
 
-STAGES = ("queued", "downloading", "transcribing", "translating", "dubbing", "done", "error")
-
 
 def video_ref(url: str) -> tuple[str, str] | None:
     """(id, canonical URL) of a YouTube video, Twitch VOD or Twitch clip link; None for anything else."""
@@ -92,9 +90,14 @@ class LinesDoc:
 
 
 def atomic_write_json(path: Path, obj) -> None:
+    atomic_write_text(path, json.dumps(obj, ensure_ascii=False, indent=1))
+
+
+def atomic_write_text(path: Path, text: str) -> None:
+    """Readers (the HTTP server) see the old file or the new one, never half of one."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(obj, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8")
     for attempt in range(20):
         try:
             os.replace(tmp, path)

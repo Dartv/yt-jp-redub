@@ -59,7 +59,8 @@ Rules:
   rather than katakana calques (警備の皆さん、ありがとう, not サンキューセキュリティ). Never split a number or
   a noun phrase across lines.
 - When a glossary of names is given, use its renderings of those names.
-- Fillers like "uh", "um" become natural Japanese fillers (えっと, あの) or are dropped.
+- Fillers like "uh", "um" become natural Japanese fillers (えっと, あの) or are dropped; a line that is only
+  filler still gets a short one, never an empty string.
 - Output ONLY a JSON object mapping every line id (as a string) to its Japanese translation (a plain string).
   No comments, no markdown.
 """
@@ -106,14 +107,16 @@ class Request:
 
 
 def _line_texts(reply: dict) -> dict[int, str]:
-    """Line id -> Japanese; a nested {"ja": ...} answer (some models wrap each line) is unwrapped."""
+    """Line id -> Japanese; a nested {"ja": ...} answer (some models wrap each line) is unwrapped.
+    Empty answers are left out, so they count as missing and the line is asked for again."""
 
     def text(v) -> str:
         if isinstance(v, dict):
             v = v.get("ja") or next((x for x in v.values() if isinstance(x, str)), "")
-        return str(v).strip()
+        return "" if v is None else str(v).strip()
 
-    return {int(k): text(v) for k, v in reply.items() if str(k).strip().isdigit()}
+    texts = {int(k): text(v) for k, v in reply.items() if str(k).strip().isdigit()}
+    return {k: v for k, v in texts.items() if v}
 
 
 def char_budgets(lines: list[Line]) -> dict[int, tuple[int, int]]:
@@ -261,7 +264,8 @@ class OpenAITranslator:
         # what counts against tokens per minute: the request, plus a reply about half as long as the prompt
         await self.limiter.acquire(_est_tokens(instructions + prompt) + _est_tokens(prompt) // 2, urgent)
         while True:
-            extra = self._effort_shapes[0](effort) if effort else {}
+            shape = self._effort_shapes[0]
+            extra = shape(effort) if effort else {}
             body = {"model": self.model, "messages": messages, "temperature": self.cfg.temperature, **extra}
             try:
                 async with self._session.post(
@@ -274,8 +278,9 @@ class OpenAITranslator:
             except (TimeoutError, aiohttp.ClientError) as e:
                 raise Retryable(f"{type(e).__name__}: {e}") from e
             if status == 400 and extra and "reasoning" in text.lower():
-                log.warning("translation API rejected %s; trying without it", next(iter(extra)))
-                self._effort_shapes.pop(0)
+                if self._effort_shapes[0] is shape:  # a concurrent request may have dropped it already
+                    log.warning("translation API rejected %s; trying without it", next(iter(extra)))
+                    self._effort_shapes.pop(0)
                 continue
             if status == 429 or status >= 500:
                 raise Retryable(f"HTTP {status}: {text[:300]}")
@@ -338,8 +343,9 @@ class OpenAITranslator:
             log.info("rewording %d lines to fit failed: %s", len(off), str(e)[:200])
             return ja
         for sentence in misfits:
-            if req.misfit(sentence, {**ja, **redo}) < req.misfit(sentence, ja):
-                ja.update((l.id, redo[l.id]) for l in sentence)
+            new = {**ja, **redo}  # a reply may reword only part of a sentence
+            if req.misfit(sentence, new) < req.misfit(sentence, ja):
+                ja.update((l.id, new[l.id]) for l in sentence)
         return ja
 
     async def glossary(self, title: str, lines: list[Line]) -> dict[str, str]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..models import LinesDoc
+from ..models import LinesDoc, atomic_write_text
 
 
 def _ts(t: float, sep: str = ".") -> str:
@@ -38,7 +38,7 @@ def vtt(doc: LinesDoc, lang: str) -> str:
 def srt(doc: LinesDoc, lang: str) -> str:
     parts = []
     for i, (s, e, text) in enumerate(cues(doc, lang), 1):
-        parts += [str(i), f"{_ts(s, ',')} --> {_ts(e, ',')}", text, ""]
+        parts += [str(i), f"{_ts(s, ',')} --> {_ts(e, ',')}", text.replace("-->", "→"), ""]
     return "\n".join(parts)
 
 
@@ -46,7 +46,4 @@ def write_all(doc: LinesDoc, subs_dir: Path) -> None:
     subs_dir.mkdir(parents=True, exist_ok=True)
     for lang in ("en", "ja"):
         for ext, fn in (("vtt", vtt), ("srt", srt)):
-            p = subs_dir / f"{lang}.{ext}"
-            tmp = p.with_suffix(".tmp")
-            tmp.write_text(fn(doc, lang), encoding="utf-8")
-            tmp.replace(p)
+            atomic_write_text(subs_dir / f"{lang}.{ext}", fn(doc, lang))

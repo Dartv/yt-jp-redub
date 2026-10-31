@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time
 
-from ..models import LinesDoc
+from ..models import Chunk, LinesDoc
 from ..pipeline import hls
 from ..pipeline.dub import dub_chunk
 
@@ -21,6 +21,11 @@ async def dub_video(w, vid: str, doc: LinesDoc, translation: asyncio.Task) -> No
 
     def translated(c: int) -> bool:
         return all(doc.lines[i].ja for i in doc.chunks[c].line_ids)
+
+    def dub(chunk: Chunk, speech: bool):
+        # runs in a thread: the first model lookup may wait for the model to load
+        models = (w.models.separator, w.models.tts) if speech else (None, None)
+        return dub_chunk(paths, doc, chunk, *models, w.cfg, w.pace)
 
     while True:
         done = {c for c in w.db.done_chunks(vid) if paths.seg("ja", c).exists()}
@@ -48,16 +53,7 @@ async def dub_video(w, vid: str, doc: LinesDoc, translation: asyncio.Task) -> No
         chunk, t0 = doc.chunks[c], time.time()
         speech = bool(chunk.line_ids)
         w.clock.dubbing(vid, doc, chunk)
-        wav = await asyncio.to_thread(
-            dub_chunk,
-            paths,
-            doc,
-            chunk,
-            w.models.separator if speech else None,
-            w.models.tts if speech else None,
-            w.cfg,
-            w.pace,
-        )
+        wav = await asyncio.to_thread(dub, chunk, speech)
         await asyncio.to_thread(hls.encode_segment, wav, paths.seg("ja", c), chunk.start)
         w.db.chunk_done(vid, c)
         w.clock.dubbed(doc, chunk, time.time() - t0)

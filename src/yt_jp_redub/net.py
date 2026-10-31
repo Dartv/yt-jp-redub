@@ -1,7 +1,7 @@
 """LAN IPv4 discovery for generated links.
 
 Candidates are private IPv4 addresses on interfaces that carry a default route;
-virtual and VPN adapters are excluded. PUBLIC_HOST in config overrides the result.
+virtual and VPN adapters are excluded. server.public_host in config.toml overrides the result.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ import re
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 EXCLUDE = re.compile(
@@ -97,16 +98,26 @@ def _fallback() -> str | None:
 
 
 _cache: tuple[float, str] | None = None
+_refreshing = threading.Lock()
 
 
 def lan_ip(ttl: float = 60.0) -> str:
-    """Cached for a minute: links follow a changed IP without shelling out on every request."""
+    """Cached: links follow a changed IP within a minute. Only the first call waits for discovery
+    (it shells out on Windows); later ones get the cached address while a thread refreshes it."""
     global _cache
-    if _cache and time.monotonic() - _cache[0] < ttl:
-        return _cache[1]
-    ip = _discover()
-    _cache = (time.monotonic(), ip)
-    return ip
+    if _cache is None:
+        _cache = (time.monotonic(), _discover())
+    elif time.monotonic() - _cache[0] >= ttl and _refreshing.acquire(blocking=False):
+        threading.Thread(target=_refresh, daemon=True).start()
+    return _cache[1]
+
+
+def _refresh() -> None:
+    global _cache
+    try:
+        _cache = (time.monotonic(), _discover())
+    finally:
+        _refreshing.release()
 
 
 def _discover() -> str:

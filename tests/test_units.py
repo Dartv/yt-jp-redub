@@ -13,6 +13,7 @@ from yt_jp_redub.pipeline.segment import lines_to_chunks, words_to_lines
 from yt_jp_redub.pipeline.speakable import speakable
 from yt_jp_redub.worker.eta import DubClock
 from yt_jp_redub.worker.scheduler import ChunkScheduler
+from yt_jp_redub.worker.status import error_hint
 
 
 def test_youtube_ids():
@@ -125,6 +126,26 @@ def test_eta_follows_dub_order_and_translation():
     assert clock.sec_per_speech > 1.0
 
 
+def test_empty_translations_count_as_missing():
+    from yt_jp_redub.pipeline.translate import _line_texts
+
+    # an empty or null answer would otherwise be saved as translated-but-blank and asked for forever
+    assert _line_texts({"1": "はい", "2": "", "3": None, "4": {"ja": "ええ"}}) == {1: "はい", 4: "ええ"}
+
+
+def test_speakable_reads_huge_numbers_digit_by_digit():
+    assert speakable("12345678901234567") == "一二三四五六七八九〇一二三四五六七"
+
+
+def test_error_hints():
+    assert error_hint(None) is None
+    what, fix = error_hint("ERROR: [youtube] x: Sign in to confirm you're not a bot")
+    assert "bot" in what and "cookies_file" in fix
+    assert error_hint("weird crash")[0] == "Something went wrong"
+    # an API outage says UNAVAILABLE; it's not the video that's unavailable
+    assert "translation" in error_hint("translation failed after 6 attempts: HTTP 503 UNAVAILABLE")[0]
+
+
 def test_scheduler_priority():
     s = ChunkScheduler(lookahead=2)
     assert s.order("v", 5) == [0, 1, 2, 3, 4]
@@ -144,7 +165,6 @@ def test_id3_timestamp():
 
 def test_vtt_and_playlist():
     doc = LinesDoc(20.0, [Line(0, 1.0, 2.0, "Hi.", "やあ。", 0), Line(1, 1.5, 3.0, "Bye.", None, 0)], [])
-    from yt_jp_redub.models import Chunk
 
     doc.chunks = [Chunk(0, 0.0, 12.5, [0, 1]), Chunk(1, 12.5, 20.0, [])]
     v = subs.vtt(doc, "ja")
@@ -169,7 +189,6 @@ def test_llm_endpoint_normalization():
 
 
 def test_llm_endpoint_paste_slips():
-    import pytest
 
     from yt_jp_redub.pipeline.translate import normalize_endpoint
 
@@ -229,7 +248,7 @@ def test_ytdlp_release_asset_per_platform(monkeypatch):
 def _translation_worker(tmp_path, translator, max_retries=5, concurrency=2):
     from types import SimpleNamespace
 
-    from yt_jp_redub.models import Chunk, VideoPaths
+    from yt_jp_redub.models import VideoPaths
 
     lines = [Line(i, i * 2.0, i * 2.0 + 1.5, f"line {i}") for i in range(30)]
     chunks = [Chunk(c, c * 20.0, c * 20.0 + 20, list(range(c * 10, c * 10 + 10))) for c in range(3)]
@@ -287,8 +306,6 @@ def test_failed_head_batch_is_retried_first(tmp_path, monkeypatch):
 
 def test_translation_gives_up_after_max_retries(tmp_path, monkeypatch):
     import asyncio
-
-    import pytest
 
     from yt_jp_redub.worker import translation
 
@@ -403,7 +420,7 @@ def test_download_filename():
 
 @pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
 def test_offline_file_packages_without_reencoding(tmp_path):
-    from yt_jp_redub.models import Chunk, VideoPaths
+    from yt_jp_redub.models import VideoPaths
     from yt_jp_redub.pipeline import export, ff
 
     paths = VideoPaths(tmp_path, "abcdefghijk")

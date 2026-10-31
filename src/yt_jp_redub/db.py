@@ -107,6 +107,3 @@ class DB:
 
     def done_chunks(self, video_id: str) -> set[int]:
         return {r["idx"] for r in self._x("SELECT idx FROM chunks WHERE video_id=? AND done=1", (video_id,))}
-
-    def chunk_count(self, video_id: str) -> int:
-        return self._x("SELECT COUNT(*) c FROM chunks WHERE video_id=?", (video_id,))[0]["c"]

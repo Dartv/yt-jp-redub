@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import random
 import time
 
@@ -23,7 +24,7 @@ async def _glossary(w, title: str, doc: LinesDoc) -> dict[str, str]:
     the rest. Without it batches translate on their own (a failure here never stops a job)."""
     lines = doc.lines[: GLOSSARY_LINES // 2]
     rest = doc.lines[GLOSSARY_LINES // 2 :]
-    lines += rest[:: max(1, len(rest) // (GLOSSARY_LINES // 2))]
+    lines += rest[:: max(1, math.ceil(len(rest) / (GLOSSARY_LINES // 2)))]
     try:
         return await w.models.translator.glossary(title, lines)
     except Exception as e:
@@ -34,6 +35,8 @@ async def _glossary(w, title: str, doc: LinesDoc) -> dict[str, str]:
 async def translate_video(w, vid: str, doc: LinesDoc) -> None:
     """Fills line.ja for every line, saving lines.json and the subtitle files after each batch.
     The chunks about to be watched go out right away; the rest wait for the glossary."""
+    if all(l.ja for l in doc.lines):  # resumed after translation finished: no glossary call either
+        return
     paths, cfg = w.paths(vid), w.cfg.translate
     budgets = char_budgets(doc.lines)  # how much Japanese fits each line's timing
     title = w.db.get_job(vid)["title"] or ""  # helps make sense of misheard names and topics
@@ -128,9 +131,9 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
                 glossary = asyncio.create_task(_glossary(w, title, doc))
             retry_at = next_retry()
             if not running and not glossary.done():  # the rest of the video waits for it
-                await asyncio.wait(
-                    [glossary], timeout=None if retry_at is None else max(0.05, retry_at - time.monotonic())
-                )
+                # but not a seek: a new head chunk goes out without it, so look again every 2 s
+                wait = 2.0 if retry_at is None else min(2.0, max(0.05, retry_at - time.monotonic()))
+                await asyncio.wait([glossary], timeout=wait)
                 continue
             if not running and retry_at is None:
                 break

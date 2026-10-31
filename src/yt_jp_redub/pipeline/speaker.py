@@ -14,6 +14,7 @@ REPO, FILE = "Wespeaker/wespeaker-voxceleb-campplus-LM", "voxceleb_CAM++_LM.onnx
 MODEL_DIR = ROOT / "models" / "wespeaker-campplus"
 _lock = threading.Lock()
 _model = None
+_missing = False  # failed once (e.g. offline): not retried, nor warned about, for every chunk
 
 
 def _load():
@@ -39,9 +40,13 @@ def embed(wav16k: np.ndarray) -> np.ndarray | None:
 
 
 def available() -> bool:
+    global _missing
+    if _missing:
+        return False
     try:
         _load()
         return True
     except Exception as e:  # offline without the model: grouping is just skipped
         log.warning("speaker model unavailable, lines are voiced one by one: %s", e)
+        _missing = True
         return False

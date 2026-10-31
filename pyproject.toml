@@ -1,7 +1,7 @@
 [project]
 name = "yt-jp-redub"
 version = "0.1.0"
-description = "Self-hosted tool that dubs YouTube videos into Japanese with emotion-preserving TTS, for Japanese learners."
+description = "Self-hosted tool that dubs YouTube and Twitch videos into Japanese with emotion-preserving TTS, for Japanese learners."
 readme = "README.md"
 license = "GPL-3.0-or-later"
 license-files = ["LICENSE"]

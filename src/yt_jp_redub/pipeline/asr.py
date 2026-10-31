@@ -7,6 +7,7 @@ length limit); token timestamps are merged into words.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable
 from pathlib import Path
 
@@ -44,20 +45,26 @@ def _preload_cuda_dlls() -> None:
         log.debug("CUDA DLL preload skipped: %s", e)
 
 
+_load_lock = threading.Lock()  # preload and a resumed job may both ask at startup
+
+
 def load(model_name: str, device: str):
     key = (model_name, device)
-    if key not in _MODEL_CACHE:
-        import onnx_asr
+    with _load_lock:
+        if key not in _MODEL_CACHE:
+            import onnx_asr
 
-        prov = _providers(device)
-        log.info("Loading ASR %s on %s", model_name, prov[0])
-        # A plain local directory: onnxruntime rejects external weight data behind HF cache symlinks.
-        model = onnx_asr.load_model(model_name, path=MODELS_DIR / model_name, providers=prov)
-        vad = onnx_asr.load_vad("silero", path=MODELS_DIR / "silero-vad", providers=["CPUExecutionProvider"])
-        _MODEL_CACHE[key] = model.with_vad(
-            vad, max_speech_duration_s=25, min_silence_duration_ms=250, speech_pad_ms=60, batch_size=4
-        ).with_timestamps()
-    return _MODEL_CACHE[key]
+            prov = _providers(device)
+            log.info("Loading ASR %s on %s", model_name, prov[0])
+            # A plain local directory: onnxruntime rejects external weight data behind HF cache symlinks.
+            model = onnx_asr.load_model(model_name, path=MODELS_DIR / model_name, providers=prov)
+            vad = onnx_asr.load_vad(
+                "silero", path=MODELS_DIR / "silero-vad", providers=["CPUExecutionProvider"]
+            )
+            _MODEL_CACHE[key] = model.with_vad(
+                vad, max_speech_duration_s=25, min_silence_duration_ms=250, speech_pad_ms=60, batch_size=4
+            ).with_timestamps()
+        return _MODEL_CACHE[key]
 
 
 def tokens_to_words(tokens: list[str], stamps: list[float], seg_start: float, seg_end: float) -> list[Word]:
@@ -102,9 +109,6 @@ def transcribe(
 
 
 def load_audio_16k(path: Path) -> np.ndarray:
-    import soundfile as sf
+    from .ff import decode_pcm
 
-    from .ff import resample
-
-    data, sr = sf.read(str(path), dtype="float32", always_2d=True)
-    return resample(data.mean(axis=1, keepdims=True), sr, 16000)[:, 0]
+    return decode_pcm(path, 16000, 1)[:, 0]  # ffmpeg downmixes and resamples: hours of audio fit in memory

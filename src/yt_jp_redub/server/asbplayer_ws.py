@@ -8,6 +8,7 @@ subtitles, which is why the whole subtitle file has to exist first.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import logging
@@ -23,9 +24,9 @@ WATCH_TTL = 30  # seconds since the last playhead report for a page to count as 
 class AsbplayerBridge:
     def __init__(self, worker):
         self.worker = worker
-        self.clients: set[web.WebSocketResponse] = set()
+        self.clients: dict[web.WebSocketResponse, set[str]] = {}  # client -> videos sent to it
         self.watching_at: dict[str, float] = {}
-        self.sent: set[tuple[int, str]] = set()  # (client id, video_id)
+        self._tasks: set[asyncio.Task] = set()
 
     def app(self) -> web.Application:
         app = web.Application()
@@ -36,7 +37,7 @@ class AsbplayerBridge:
     async def handle(self, req: web.Request) -> web.WebSocketResponse:
         ws = web.WebSocketResponse(heartbeat=30)
         await ws.prepare(req)
-        self.clients.add(ws)
+        self.clients[ws] = set()
         log.info("asbplayer connected (%d client(s))", len(self.clients))
         for vid in list(self.watching_at):
             await self._maybe_send(vid)
@@ -52,7 +53,7 @@ class AsbplayerBridge:
                     elif data.get("command") == "ping":
                         await ws.send_json({"command": "pong"})
         finally:
-            self.clients.discard(ws)
+            self.clients.pop(ws, None)
         return ws
 
     def watching(self, vid: str) -> None:
@@ -60,14 +61,15 @@ class AsbplayerBridge:
         first = vid not in self.watching_at or time.time() - self.watching_at[vid] > WATCH_TTL
         self.watching_at[vid] = time.time()
         if first:
-            import asyncio
-
-            asyncio.get_running_loop().create_task(self._maybe_send(vid))
+            self._spawn(self._maybe_send(vid))
 
     def subs_ready(self, vid: str) -> None:
-        import asyncio
+        self._spawn(self._maybe_send(vid))
 
-        asyncio.get_running_loop().create_task(self._maybe_send(vid))
+    def _spawn(self, coro) -> None:
+        task = asyncio.get_running_loop().create_task(coro)
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
 
     async def _maybe_send(self, vid: str) -> None:
         if time.time() - self.watching_at.get(vid, 0) < WATCH_TTL:
@@ -89,18 +91,17 @@ class AsbplayerBridge:
         if not files:
             return 0
         n = 0
-        for ws in list(self.clients):
-            key = (id(ws), vid)
-            if key in self.sent and not force:
+        for ws, sent in list(self.clients.items()):
+            if vid in sent and not force:
                 continue
             try:
                 await ws.send_json(
                     {"command": "load-subtitles", "messageId": str(uuid.uuid4()), "body": {"files": files}}
                 )
-                self.sent.add(key)
+                sent.add(vid)
                 n += 1
             except ConnectionError:
-                self.clients.discard(ws)
+                self.clients.pop(ws, None)
         if n:
             log.info("Sent %s subtitles to %d asbplayer client(s)", vid, n)
         return n

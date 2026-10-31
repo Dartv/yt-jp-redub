@@ -180,7 +180,10 @@ def _no_hevc(video: Path, tmp: Path) -> None:
 
 
 def _thumbnail(url: str, out: Path) -> None:
+    if not url.startswith("https://"):  # from the video's metadata
+        return
     try:
-        urllib.request.urlretrieve(url, out)
+        with urllib.request.urlopen(url, timeout=30) as r:
+            out.write_bytes(r.read())
     except OSError as e:  # the server falls back to YouTube's own URL
         log.debug("thumbnail download failed: %s", e)

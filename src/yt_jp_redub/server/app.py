@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 import time
 from urllib.parse import quote
@@ -41,10 +42,19 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         return f"{base()}/watch/{vid}"
 
     def job_or_404(vid: str) -> dict:
-        st = worker.status(vid)
-        if st is None:
+        job = worker.db.get_job(vid)
+        if job is None:
             raise web.HTTPNotFound(text="unknown video")
-        return st
+        return job
+
+    async def json_body(req) -> dict:
+        try:
+            data = await req.json() if req.content_type == "application/json" else await req.post()
+        except ValueError:
+            raise web.HTTPBadRequest(text="invalid JSON") from None
+        if not hasattr(data, "get"):
+            raise web.HTTPBadRequest(text="expected an object")
+        return data
 
     # ------------------------------------------------------------- pages
     async def index(_):
@@ -80,7 +90,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         )
 
     async def api_submit(req):
-        data = await req.json() if req.content_type == "application/json" else await req.post()
+        data = await json_body(req)
         try:
             vid, created = worker.submit(str(data.get("url", "")))
         except ValueError as e:
@@ -96,7 +106,10 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         return web.json_response({"jobs": out, "current": worker.current})
 
     async def api_status(req):
-        return web.json_response(job_or_404(req.match_info["vid"]), headers=NO_STORE)
+        st = worker.status(req.match_info["vid"])
+        if st is None:
+            raise web.HTTPNotFound(text="unknown video")
+        return web.json_response(st, headers=NO_STORE)
 
     async def api_lines(req):
         vid = req.match_info["vid"]
@@ -112,8 +125,14 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     async def api_playhead(req):
         vid = req.match_info["vid"]
         job_or_404(vid)
-        data = await req.json()
-        worker.report_playhead(vid, float(data.get("t", 0)), save=bool(data.get("save", True)))
+        data = await json_body(req)
+        try:
+            t = float(data.get("t", 0))
+        except (TypeError, ValueError):
+            t = math.nan
+        if not math.isfinite(t):
+            raise web.HTTPBadRequest(text="t must be a number of seconds")
+        worker.report_playhead(vid, t, save=bool(data.get("save", True)))
         if asb and data.get("asbplayer"):
             asb.watching(vid)
         return web.json_response({"ok": True})
@@ -200,6 +219,9 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     async def audio_segment(req):
         vid, paths = media_paths(req)
         lang, n = req.match_info["lang"], int(req.match_info["n"])
+        doc = worker.doc(vid)
+        if doc is None or n >= len(doc.chunks):
+            raise web.HTTPNotFound()
         p = paths.seg(lang, n)
         if not p.exists() and lang == "ja":
             # hold the request: it doubles as a priority hint for the worker
@@ -234,7 +256,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         """The .mp4 for offline viewing, packaged now from the finished streams."""
         vid = req.match_info["vid"]
         job = job_or_404(vid)
-        if job["stage"] != "done" or not job["ready"]:
+        if job["stage"] != "done" or not worker.status(vid)["ready"]:
             raise web.HTTPConflict(text="Only a fully dubbed video can be downloaded")
         try:
             path = await worker.offline_file(vid)
@@ -277,10 +299,14 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
     r.add_get(f"{m}/download.{{lang:ja|en}}.srt", download_subs)
 
     @web.middleware
-    async def cors(req, handler):
+    async def headers(req, handler):
         resp = await handler(req)
-        resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        # media for players on other origins (asbplayer); the API stays private to this page
+        if req.path.startswith("/media/"):
+            resp.headers.setdefault("Access-Control-Allow-Origin", "*")
+        if req.path.startswith("/static/"):  # revalidate, so an upgrade's JS/CSS is picked up at once
+            resp.headers.setdefault("Cache-Control", "no-cache")
         return resp
 
-    app.middlewares.append(cors)
+    app.middlewares.append(headers)
     return app

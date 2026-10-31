@@ -29,6 +29,7 @@ def job_status(w, video_id: str) -> dict | None:
         "duration": job["duration"],
         "stage": job["stage"],
         "error": job["error"],
+        "error_hint": error_hint(job["error"]),
         "stage_progress": w.progress.get(video_id),
         "translated": job["translated"],
         "total_lines": job["total_lines"],
@@ -50,6 +51,42 @@ def job_status(w, video_id: str) -> dict | None:
     out["percent"] = percent(out)
     out["download_size"] = download_size(w.paths(video_id))
     return out
+
+
+# what a failure means for the viewer, by a phrase in its error: (what happened, what to do)
+ERROR_HINTS = (
+    (
+        "translation api",
+        "The translation service refused the request",
+        "Check LLM_API_KEY and LLM_BASE_URL in .env, then retry.",
+    ),
+    ("translation failed", "The translation service kept failing", "Retry in a few minutes."),
+    (
+        "confirm you",
+        "YouTube asked to confirm you're not a bot",
+        "Set cookies_file in config.toml (see the README), then retry.",
+    ),
+    ("private video", "The video is private", ""),
+    ("video unavailable", "The video isn't available (removed, private or region-locked)", ""),
+    (
+        "members-only",
+        "The video is for channel members only",
+        "Set cookies_file in config.toml (see the README), then retry.",
+    ),
+    ("out of memory", "The GPU ran out of memory", "Close other programs using the GPU, then retry."),
+)
+
+
+def error_hint(error: str | None) -> list[str] | None:
+    if not error:
+        return None
+    low = error.lower()
+    return list(
+        next(
+            (h[1:] for h in ERROR_HINTS if h[0] in low),
+            ("Something went wrong", "Retry; the details say more."),
+        )
+    )
 
 
 def _round(x: float | None) -> float | None:

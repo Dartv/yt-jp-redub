@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import shutil
 import time
 from collections import defaultdict
@@ -195,7 +196,7 @@ class Worker:
             async with self.changed:
                 self.changed.notify_all()
 
-        asyncio.get_running_loop().create_task(wake_waiters())
+        self._background(wake_waiters())
         _emit(self.listeners, vid)
 
     def set_stage(self, vid: str, stage: str, **fields) -> None:
@@ -217,7 +218,7 @@ class Worker:
 
     # ------------------------------------------------------------------ the queue
     async def run(self) -> None:
-        self._enforce_cap()
+        await self._enforce_cap()
         # finished videos from before dub tracks existed get one now, so their download is instant
         self._drop_offline_files()
         done = [j["video_id"] for j in self.db.list_jobs() if j["stage"] == "done"]
@@ -242,10 +243,12 @@ class Worker:
                 self.set_stage(vid, "error", error=f"{type(e).__name__}: {e}"[:1000])
             finally:
                 self.current = None
-            self._enforce_cap()
+            await self._enforce_cap()
 
-    def _enforce_cap(self) -> None:
-        enforce_cap(self.db, self.cfg.videos_dir, self.cfg.storage.cap_gb, self.delete)
+    async def _enforce_cap(self) -> None:
+        await asyncio.to_thread(
+            enforce_cap, self.db, self.cfg.videos_dir, self.cfg.storage.cap_gb, self.delete
+        )
 
     async def process(self, vid: str) -> LinesDoc:
         """Runs (or resumes) every stage of one job; each stage skips work already on disk."""
@@ -330,7 +333,7 @@ class Worker:
 
         total = ff.duration(paths.audio_wav)
         with sf.SoundFile(str(out), "w", samplerate=ff.SR, channels=2, subtype="PCM_16") as f:
-            for t in range(0, int(total) + 1, 120):
+            for t in range(0, math.ceil(total), 120):
                 data, sr = ff.read_slice(paths.audio_wav, t, min(total, t + 120))
                 f.write(np.clip(self.models.separator.separate(data, sr)[0], -1, 1))
 

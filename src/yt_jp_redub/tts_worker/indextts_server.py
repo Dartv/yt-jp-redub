@@ -49,14 +49,14 @@ def main():
         raw = raw.strip()
         if not raw:
             continue
-        req = json.loads(raw)
-        if req.get("cmd") == "quit":
-            break
-        t0 = time.time()
-        # generation settings: a cap on the speech tokens keeps very short texts from running on into
-        # babble; one beam is ~20% faster than IndexTTS's default three at the same quality
-        gen = {k: int(req[k]) for k in ("max_mel_tokens", "num_beams") if req.get(k)}
+        req, t0 = {}, time.time()
         try:
+            req = json.loads(raw)
+            if req.get("cmd") == "quit":
+                break
+            # generation settings: a cap on the speech tokens keeps very short texts from running on into
+            # babble; one beam is ~20% faster than IndexTTS's default three at the same quality
+            gen = {k: int(req[k]) for k in ("max_mel_tokens", "num_beams") if req.get(k)}
             tts.infer(
                 spk_audio_prompt=req["ref"],
                 text=req["text"],

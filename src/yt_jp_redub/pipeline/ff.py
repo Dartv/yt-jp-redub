@@ -37,6 +37,7 @@ def probe(path: Path) -> dict:
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
     )
     if p.returncode != 0:
         raise RuntimeError(f"ffprobe failed on {path}: {p.stderr}")
@@ -48,7 +49,10 @@ def duration(path: Path) -> float:
 
 
 def to_wav(src: Path, dst: Path, sr: int = SR, channels: int = 2) -> None:
-    run_ffmpeg(["-i", str(src), "-vn", "-ac", str(channels), "-ar", str(sr), "-c:a", "pcm_s16le", str(dst)])
+    """Written under a temporary name, so an interrupted conversion isn't mistaken for a finished one."""
+    tmp = dst.with_suffix(".part.wav")
+    run_ffmpeg(["-i", str(src), "-vn", "-ac", str(channels), "-ar", str(sr), "-c:a", "pcm_s16le", str(tmp)])
+    tmp.replace(dst)
 
 
 def read_slice(path: Path, start: float, end: float) -> tuple[np.ndarray, int]:

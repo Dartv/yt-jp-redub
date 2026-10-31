@@ -34,7 +34,7 @@ class IndexTTSClient:
         emo_alpha: float = 1.0,
         num_beams: int = 1,
     ):
-        self.dir, self.lang, self.emo_alpha, self.num_beams = indextts_dir, lang, emo_alpha, num_beams
+        self.lang, self.emo_alpha, self.num_beams = lang, emo_alpha, num_beams
         py = _venv_python(indextts_dir)
         if not py.exists():
             raise RuntimeError(f"IndexTTS environment not found at {indextts_dir} (run setup).")
@@ -61,9 +61,13 @@ class IndexTTSClient:
         )
         self._ids = itertools.count(1)
         self._lock = threading.Lock()
-        ready = self._read()
-        if not ready.get("ready"):
-            raise RuntimeError(f"IndexTTS worker failed to start: {ready}")
+        try:
+            ready = self._read()
+            if not ready.get("ready"):
+                raise RuntimeError(f"IndexTTS worker failed to start: {ready}")
+        except Exception:
+            self.close()
+            raise
         log.info("IndexTTS ready on %s", ready.get("device"))
 
     def _read(self) -> dict:
@@ -103,6 +107,7 @@ class IndexTTSClient:
             self.proc.wait(10)
         except Exception:
             self.proc.kill()
+            self.proc.wait()
         finally:
             self._stderr_log.close()
 

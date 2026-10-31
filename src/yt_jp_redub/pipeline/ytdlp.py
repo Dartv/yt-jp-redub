@@ -11,12 +11,14 @@ import json
 import logging
 import os
 import platform
+import shutil
 import stat
 import subprocess
 import sys
 import threading
 import time
 import urllib.request
+from collections import deque
 from collections.abc import Callable
 from pathlib import Path
 
@@ -54,7 +56,8 @@ def ensure() -> Path:
             BIN_DIR.mkdir(parents=True, exist_ok=True)
             log.info("Downloading yt-dlp (%s)", exe.name)
             tmp = exe.with_suffix(".part")
-            urllib.request.urlretrieve(RELEASES + exe.name, tmp)
+            with urllib.request.urlopen(RELEASES + exe.name, timeout=60) as r, open(tmp, "wb") as f:
+                shutil.copyfileobj(r, f)
             tmp.chmod(tmp.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
             os.replace(tmp, exe)
             _stamp().write_text(str(time.time()))
@@ -84,17 +87,19 @@ def update(force: bool = False) -> None:
 
 
 def run(args: list[str], on_line: Callable[[str], None] | None = None) -> subprocess.CompletedProcess:
-    """Runs yt-dlp; streams stdout lines to on_line when given."""
+    """Runs yt-dlp; streams output lines to on_line when given (stderr merged in, so neither pipe can
+    fill up and stall it; the last lines stand in for stderr)."""
     cmd = [str(ensure()), "--no-warnings", *args]
     if on_line is None:
         return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    tail = deque(maxlen=40)
     with subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace"
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace"
     ) as p:
         for line in p.stdout:
-            on_line(line.rstrip())
-        err = p.stderr.read()
-    return subprocess.CompletedProcess(cmd, p.returncode, "", err)
+            tail.append(line.rstrip())
+            on_line(tail[-1])
+    return subprocess.CompletedProcess(cmd, p.returncode, "", "\n".join(tail))
 
 
 def info(url: str, extra: list[str]) -> dict:

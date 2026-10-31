@@ -58,10 +58,14 @@ async def _serve(cfg) -> None:
     worker.subs_listeners.append(asb.subs_ready)
 
     runners = []
-    for app, port in ((build_app(cfg, worker, asb), cfg.server.port), (asb.app(), cfg.server.ws_port)):
+    # asbplayer's WebSocket client runs on this PC only, so its port isn't opened to the network
+    for app, host, port in (
+        (build_app(cfg, worker, asb), cfg.server.host, cfg.server.port),
+        (asb.app(), "127.0.0.1", cfg.server.ws_port),
+    ):
         runner = web.AppRunner(app, access_log=None)
         await runner.setup()
-        await web.TCPSite(runner, cfg.server.host, port).start()
+        await web.TCPSite(runner, host, port).start()
         runners.append(runner)
 
     base = public_base(cfg)

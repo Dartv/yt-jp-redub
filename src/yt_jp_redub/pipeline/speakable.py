@@ -54,7 +54,8 @@ def kanji_number(n: int) -> str:
 def _number(m: re.Match) -> str:
     text = m.group().replace(",", "").replace("，", "").replace("．", ".")
     whole, _, frac = text.partition(".")
-    out = kanji_number(int(whole))
+    # past 兆, read digit by digit
+    out = "".join(_DIGITS[int(d)] for d in whole) if len(whole) > 16 else kanji_number(int(whole))
     return out + "点" + "".join(_DIGITS[int(d)] for d in frac) if frac else out
 
 
