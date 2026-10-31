@@ -80,20 +80,10 @@
         <p class="note" id="readonly" hidden>You can change these on the PC that runs yt-jp-redub.</p>
         <fieldset id="fields">
           <div class="welcome" id="welcome" hidden>
-            <p>Welcome! One step before your first dub: the translation runs through an AI provider, which
-              needs an API key.</p>
+            <p>Welcome! One step before your first dub: the translation runs through your AI provider.</p>
             <ol>
-              <li>
-                Pick one: <button type="button" data-provider="google">Google AI Studio</button> is free but
-                slow to start; <button type="button" data-provider="xai">xAI Grok</button> is paid and starts
-                in under a minute.
-              </li>
-              <li>
-                Get a key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener"
-                  >aistudio.google.com/apikey</a
-                > or <a href="https://console.x.ai" target="_blank" rel="noopener">console.x.ai</a>.
-              </li>
-              <li>Paste it into API key below, press Save, then paste a YouTube or Twitch link.</li>
+              <li>Enter its address, model and API key under Translation below.</li>
+              <li>Press Save, then paste a YouTube or Twitch link.</li>
             </ol>
           </div>
           <h3>Translation</h3>
@@ -103,7 +93,7 @@
           /></label>
           <label><span>Model</span><input name="llm_model" required spellcheck="false" /></label>
           <label
-            ><span>API key<small>For Google AI Studio: aistudio.google.com/apikey</small></span>
+            ><span>API key</span>
             <input name="llm_api_key" type="password" autocomplete="off" spellcheck="false" placeholder="Not set"
           /></label>
 

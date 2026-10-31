@@ -90,16 +90,6 @@ fetch("/api/settings", { cache: "no-store" })
   .then((r) => r.json())
   .then((s) => s.first_run && s.editable && showSettings(s))
   .catch(() => {});
-const PROVIDERS = {
-  google: ["https://generativelanguage.googleapis.com/v1beta/openai/", "gemma-4-31b-it"],
-  xai: ["https://api.x.ai/v1", "grok-4.3"],
-};
-document.getElementById("welcome").addEventListener("click", (e) => {
-  const p = PROVIDERS[e.target.dataset.provider];
-  if (!p) return;
-  [sform.elements.llm_base_url.value, sform.elements.llm_model.value] = p;
-  sform.elements.llm_api_key.focus();
-});
 sform.addEventListener("input", (e) => e.target.setCustomValidity?.(""));
 // typing a new key replaces the mask rather than adding to it
 sform.elements.llm_api_key.addEventListener("focus", (e) => e.target.value === KEY_MASK && e.target.select());
