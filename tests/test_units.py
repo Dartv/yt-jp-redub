@@ -11,6 +11,7 @@ from yt_jp_redub.pipeline import hls, subs
 from yt_jp_redub.pipeline.asr import tokens_to_words
 from yt_jp_redub.pipeline.segment import lines_to_chunks, words_to_lines
 from yt_jp_redub.pipeline.speakable import speakable
+from yt_jp_redub.server.cards import cards_html
 from yt_jp_redub.worker.eta import DubClock
 from yt_jp_redub.worker.scheduler import ChunkScheduler
 from yt_jp_redub.worker.status import error_hint
@@ -177,6 +178,34 @@ def test_low_vram_stages_take_turns(monkeypatch):
     assert not on_gpu and {"tts", "separator"} <= m.__dict__.keys()
     m.preload("asr")
     assert on_gpu == {"asr"} and "tts" not in m.__dict__
+
+
+def test_library_cards_escape_titles_and_say_where_each_video_is():
+    job = {
+        "video_id": "abcdefghijk",
+        "title": '<img src=x onerror="alert(1)">',
+        "duration": 65,
+        "stage": "dubbing",
+        "label": "Dubbing",
+        "error": None,
+        "error_hint": None,
+        "percent": 42,
+        "position": None,
+        "chunks_done": 1,
+        "download_size": None,
+        "ready": False,
+        "resume_at": None,
+    }
+    html = cards_html([job])
+    assert "<img" not in html and "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in html
+    assert "Dubbing · 42% · watchable" in html and ">1:05<" in html and 'class="dl"' not in html
+    done = cards_html([{**job, "stage": "done", "ready": True, "download_size": 2.5e9, "resume_at": 30}])
+    assert "Ready · 2.5 GB" in done and 'class="dl"' in done and "watched" in done
+    failed = cards_html(
+        [{**job, "stage": "error", "label": "Failed", "error_hint": ["The video is private", ""]}]
+    )
+    assert "Failed · The video is private" in failed and 'hx-post="/api/jobs/abcdefghijk/retry"' in failed
+    assert "Paste a YouTube" in cards_html([])
 
 
 def test_error_hints():

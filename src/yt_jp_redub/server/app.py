@@ -17,6 +17,7 @@ from ..models import VID_RE, is_youtube
 from ..net import public_base
 from ..pipeline import hls
 from ..worker import Worker
+from .cards import cards_html
 
 log = logging.getLogger(__name__)
 WEB = ROOT / "web"
@@ -55,6 +56,11 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         if not hasattr(data, "get"):
             raise web.HTTPBadRequest(text="expected an object")
         return data
+
+    def cards() -> web.Response:
+        """The library's cards, for htmx (which sends HX-Request) to swap in."""
+        jobs = [worker.status(j["video_id"]) for j in worker.db.list_jobs()]
+        return web.Response(text=cards_html(jobs), content_type="text/html", headers=NO_STORE)
 
     # ------------------------------------------------------------- pages
     async def index(_):
@@ -95,9 +101,12 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
             vid, created = worker.submit(str(data.get("url", "")))
         except ValueError as e:
             return web.json_response({"error": str(e)}, status=400)
-        return web.json_response({"video_id": vid, "created": created, "link": link(vid)})
+        go = {"HX-Redirect": f"/watch/{vid}"} if "HX-Request" in req.headers else None
+        return web.json_response({"video_id": vid, "created": created, "link": link(vid)}, headers=go)
 
-    async def api_list(_):
+    async def api_list(req):
+        if "HX-Request" in req.headers:
+            return cards()
         out = []
         for j in worker.db.list_jobs():
             st = worker.status(j["video_id"])
@@ -141,7 +150,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         vid = req.match_info["vid"]
         job = job_or_404(vid)
         worker.submit(job["url"])
-        return web.json_response({"ok": True})
+        return cards() if "HX-Request" in req.headers else web.json_response({"ok": True})
 
     async def api_delete(req):
         vid = req.match_info["vid"]
@@ -150,7 +159,7 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
             worker.delete(vid)
         except RuntimeError as e:
             return web.json_response({"error": str(e)}, status=409)
-        return web.json_response({"ok": True})
+        return cards() if "HX-Request" in req.headers else web.json_response({"ok": True})
 
     async def api_asbplayer(req):
         vid = req.match_info["vid"]

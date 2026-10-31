@@ -170,14 +170,15 @@ src/yt_jp_redub/
   pipeline/           one module per stage: download (+ytdlp), asr, segment, translate,
                       separate, speaker, pace, speakable, tts, dub, hls, subs, export
   worker/             job queue, translation and dubbing loops, chunk scheduler, ETAs, status, storage cap
-  server/             HTTP API + HLS endpoints, asbplayer WebSocket bridge
+  server/             HTTP API + HLS endpoints, library cards for htmx, asbplayer WebSocket bridge
   tts_worker/         IndexTTS process (runs in IndexTTS's own environment)
-web/                  library and player (plain HTML/CSS/JS, hls.js vendored)
+web/                  library (htmx) and player (plain HTML/CSS/JS, no build step; hls.js and htmx vendored)
+  player/             the player as ES modules, one job each; main.js wires them together
 ```
 
 ## Licenses and disclaimer
 
 - This project: GPL-3.0 ([LICENSE](LICENSE)).
-- Dependencies: yt-dlp (Unlicense, downloaded at runtime), Demucs (MIT), Parakeet TDT 0.6B v2 weights (CC-BY-4.0), WeSpeaker CAM++ (Apache-2.0), hls.js (Apache-2.0, vendored in `web/vendor`), Project Nayuki's QR Code generator (MIT, vendored in `src/yt_jp_redub/_vendor`).
+- Dependencies: yt-dlp (Unlicense, downloaded at runtime), Demucs (MIT), Parakeet TDT 0.6B v2 weights (CC-BY-4.0), WeSpeaker CAM++ (Apache-2.0), hls.js (Apache-2.0) and htmx (0BSD), both vendored in `web/vendor`, Project Nayuki's QR Code generator (MIT, vendored in `src/yt_jp_redub/_vendor`).
 - IndexTTS-2.5 weights fall under the [Bilibili Model Use License](https://huggingface.co/IndexTeam/IndexTTS-2.5). `setup` downloads them; this project never redistributes them.
 - Downloading YouTube content is for personal use only. You are responsible for complying with YouTube's Terms of Service and copyright law where you live.

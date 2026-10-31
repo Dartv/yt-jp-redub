@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0e0f11" />
     <title>yt-jp-redub</title>
     <link rel="stylesheet" href="/static/style.css" />
+    <script src="/static/vendor/htmx.min.js"></script>
     <link
       rel="icon"
       href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎙️</text></svg>"
@@ -32,9 +33,10 @@
         </button>
       </header>
 
-      <form class="add" id="add">
+      <form class="add" id="add" hx-post="/api/jobs" hx-swap="none">
         <input
           id="url"
+          name="url"
           type="url"
           inputmode="url"
           placeholder="Paste a YouTube or Twitch link"
@@ -57,7 +59,8 @@
         <button type="submit">Dub</button>
       </form>
 
-      <div id="grid" class="grid"></div>
+      <!-- the cards come from the server; buttons in them swap in the updated cards -->
+      <div id="grid" class="grid" hx-get="/api/jobs" hx-trigger="load, every 3s" hx-target="#grid"></div>
 
       <details class="help">
         <summary>Other ways to add videos</summary>
@@ -145,7 +148,6 @@
       </form>
     </dialog>
 
-    <script src="/static/common.js"></script>
-    <script src="/static/library.js"></script>
+    <script type="module" src="/static/library.js"></script>
   </body>
 </html>

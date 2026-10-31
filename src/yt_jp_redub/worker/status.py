@@ -2,6 +2,17 @@
 
 from __future__ import annotations
 
+# each stage as the viewer reads it
+STAGE_LABELS = {
+    "queued": "Queued",
+    "downloading": "Downloading",
+    "transcribing": "Transcribing",
+    "translating": "Translating",
+    "dubbing": "Dubbing",
+    "done": "Dub complete",
+    "error": "Failed",
+}
+
 
 def job_status(w, video_id: str) -> dict | None:
     job = w.db.get_job(video_id)
@@ -28,6 +39,7 @@ def job_status(w, video_id: str) -> dict | None:
         "url": job["url"],
         "duration": job["duration"],
         "stage": job["stage"],
+        "label": STAGE_LABELS.get(job["stage"], job["stage"]),
         "error": job["error"],
         "error_hint": error_hint(job["error"]),
         "stage_progress": w.progress.get(video_id),
