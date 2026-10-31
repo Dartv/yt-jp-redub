@@ -23,6 +23,13 @@
             <span>Point the camera at the code. Same Wi-Fi.</span>
           </div>
         </aside>
+        <button type="button" class="gear" id="gear" aria-label="Settings" title="Settings">
+          <svg viewBox="0 0 24 24">
+            <path
+              d="M19.14 12.94a7.1 7.1 0 0 0 0-1.88l2.03-1.58a.5.5 0 0 0 .12-.61l-1.92-3.32a.5.5 0 0 0-.59-.22l-2.39.96a7 7 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.48-.41h-3.84a.5.5 0 0 0-.47.41l-.36 2.54a7.4 7.4 0 0 0-1.62.94l-2.39-.96a.5.5 0 0 0-.59.22L2.74 8.87a.5.5 0 0 0 .12.61l2.03 1.58a7.1 7.1 0 0 0 0 1.88l-2.03 1.58a.5.5 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54a7 7 0 0 0 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 0 0-.12-.61zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"
+            />
+          </svg>
+        </button>
       </header>
 
       <form class="add" id="add">
@@ -63,6 +70,80 @@
         <p>asbplayer on this PC: enable its WebSocket client with <code id="ws"></code></p>
       </details>
     </main>
+
+    <dialog class="settings" id="settings" aria-labelledby="settingsTitle">
+      <form method="dialog" id="settingsForm">
+        <h2 id="settingsTitle">Settings</h2>
+        <p class="note" id="readonly" hidden>You can change these on the PC that runs yt-jp-redub.</p>
+        <fieldset id="fields">
+          <h3>Translation</h3>
+          <label
+            ><span>Provider<small>Any OpenAI-compatible API address</small></span>
+            <input name="llm_base_url" type="url" required spellcheck="false"
+          /></label>
+          <label><span>Model</span><input name="llm_model" required spellcheck="false" /></label>
+          <label
+            ><span>API key<small>For Google AI Studio: aistudio.google.com/apikey</small></span>
+            <input name="llm_api_key" type="password" autocomplete="off" spellcheck="false"
+          /></label>
+
+          <h3>Videos</h3>
+          <label
+            ><span>Best quality</span>
+            <select name="max_height">
+              <option value="480">480p</option>
+              <option value="720">720p</option>
+              <option value="1080">1080p</option>
+              <option value="1440">1440p</option>
+              <option value="2160">2160p (4K)</option>
+            </select></label
+          >
+          <label
+            ><span>Storage limit, GB<small>Past it, the least recently watched videos are deleted</small></span>
+            <input name="cap_gb" type="number" min="1" step="any" required
+          /></label>
+          <label
+            ><span>Cookies file<small>For age-restricted or subscriber-only videos (see the README)</small></span>
+            <input name="cookies_file" placeholder="None" spellcheck="false"
+          /></label>
+
+          <h3>Dub</h3>
+          <label
+            ><span>Fastest speech<small>How much faster lines may be spoken to fit</small></span>
+            <input name="max_speedup" type="number" min="1" max="2" step="0.05" required
+          /></label>
+          <label
+            ><span>Slowest speech<small>How much slower, to fill the original's time</small></span>
+            <input name="max_slowdown" type="number" min="1" max="2" step="0.05" required
+          /></label>
+
+          <h3>GPU</h3>
+          <label
+            ><span>Low video memory<small>The models take turns on the GPU: ~6 GB, a few seconds slower start</small></span>
+            <select name="low_vram">
+              <option value="auto">Automatic (below 14 GB)</option>
+              <option value="true">On</option>
+              <option value="false">Off</option>
+            </select></label
+          >
+          <label
+            ><span>Free the GPU after, minutes<small>Idle time before the models unload; 0 keeps them</small></span>
+            <input name="unload_after_min" type="number" min="0" max="1440" step="any" required
+          /></label>
+
+          <h3>Server</h3>
+          <label
+            ><span>Port<small>Takes effect after a restart</small></span>
+            <input name="port" type="number" min="1024" max="65535" step="1" required
+          /></label>
+        </fieldset>
+        <p class="error" id="settingsError" role="alert"></p>
+        <menu>
+          <button value="cancel" formnovalidate>Close</button>
+          <button value="save" class="primary" id="saveSettings">Save</button>
+        </menu>
+      </form>
+    </dialog>
 
     <script src="/static/common.js"></script>
     <script src="/static/library.js"></script>

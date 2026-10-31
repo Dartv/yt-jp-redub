@@ -63,7 +63,7 @@ On your phone, join the same Wi-Fi and point the camera at the QR code (in the t
 - Bookmarklet (PC): drag "Dub this" from the library's "Other ways to add videos" to your bookmarks bar, then click it on any YouTube video or Twitch VOD or clip page.
 - Command line: `uv run yt-jp-redub add <url>` queues the video on the running server and opens the player.
 
-Twitch VODs (`twitch.tv/videos/…`) and clips work; live streams don't. Twitch video is capped at 720p, since streams run for hours. Subscriber-only VODs need `cookies_file` in `config.toml`. A whole VOD downloads before dubbing starts, so a multi-hour stream takes a while to get going.
+Twitch VODs (`twitch.tv/videos/…`) and clips work; live streams don't. Twitch video is capped at 720p, since streams run for hours. Subscriber-only VODs need a cookies file (in the library's settings). A whole VOD downloads before dubbing starts, so a multi-hour stream takes a while to get going.
 
 Videos are dubbed one at a time, in the order you add them, with no length limit. Adding a link that is already done or in progress opens it again.
 
@@ -122,7 +122,9 @@ Install [Yomitan](https://github.com/yomidevs/yomitan) with a Japanese dictionar
 
 ## Configuration
 
-`config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment. The ones you're most likely to change are video quality, the storage cap, ports, the cookies file, and the translation limits. `.env` holds the secrets.
+The gear button in the library changes the common settings: the translation provider and its API key, video quality, the storage cap, the cookies file, dub speed limits, low-VRAM mode and the port. They're saved into `config.toml` and `.env` and apply from the next video; the port needs a restart. Only a browser on the PC that runs the server can change them; a phone sees them read-only.
+
+`config.toml` holds the settings; [config.example.toml](config.example.toml) lists every option with a comment, and saving from the library keeps the comments. `.env` holds the secrets.
 
 To use another translation provider, set `LLM_BASE_URL`, `LLM_API_KEY` and `LLM_MODEL` in `.env` for any OpenAI-compatible endpoint, including local ones like Ollama or LM Studio. Set `LLM_SYSTEM_PROMPT=true` if the model accepts system prompts (Gemma on AI Studio doesn't).
 

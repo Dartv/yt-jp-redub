@@ -52,7 +52,8 @@ a {
   text-decoration: none;
 }
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -113,6 +114,133 @@ button {
 .brand .phone span {
   display: block;
   font-size: 12px;
+}
+.brand .gear {
+  margin-left: auto;
+  align-self: center;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  color: var(--muted);
+}
+.brand .phone:not([hidden]) ~ .gear {
+  margin-left: 4px;
+}
+.brand .gear:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+.brand .gear svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+dialog.settings {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+dialog.settings::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+dialog.settings form {
+  padding: 22px 22px 18px;
+}
+dialog.settings h2 {
+  margin: 0 0 4px;
+  font-size: 18px;
+  font-weight: 650;
+}
+dialog.settings h3 {
+  margin: 20px 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+dialog.settings fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+dialog.settings label {
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 230px);
+  align-items: center;
+  gap: 4px 16px;
+  margin: 10px 0;
+  font-size: 14px;
+}
+dialog.settings small {
+  display: block;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.35;
+}
+dialog.settings input,
+dialog.settings select {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+dialog.settings input::placeholder {
+  color: var(--muted);
+}
+dialog.settings fieldset:disabled input,
+dialog.settings fieldset:disabled select {
+  opacity: 0.7;
+}
+dialog.settings .note,
+dialog.settings .error {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+dialog.settings .error {
+  color: var(--accent);
+}
+dialog.settings .error:empty {
+  display: none;
+}
+dialog.settings menu {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+}
+dialog.settings menu button {
+  padding: 8px 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-weight: 600;
+}
+dialog.settings menu .primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+@media (max-width: 520px) {
+  dialog.settings label {
+    grid-template-columns: 1fr;
+  }
+}
+@media (pointer: coarse) {
+  .brand .gear {
+    width: 44px;
+    height: 44px;
+  }
 }
 form.add {
   display: flex;

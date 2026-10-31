@@ -182,7 +182,7 @@ def test_low_vram_stages_take_turns(monkeypatch):
 def test_error_hints():
     assert error_hint(None) is None
     what, fix = error_hint("ERROR: [youtube] x: Sign in to confirm you're not a bot")
-    assert "bot" in what and "cookies_file" in fix
+    assert "bot" in what and "cookies file" in fix
     assert error_hint("weird crash")[0] == "Something went wrong"
     # an API outage says UNAVAILABLE; it's not the video that's unavailable
     assert "translation" in error_hint("translation failed after 6 attempts: HTTP 503 UNAVAILABLE")[0]
@@ -506,3 +506,40 @@ def test_qr_renderings():
     lines = qr.terminal(url).splitlines()
     assert len(lines) == (n + 1) // 2 and all(len(l) == n for l in lines)
     assert f'viewBox="0 0 {n} {n}"' in qr.svg(url)
+
+
+def test_settings_dialog_writes_config_and_env_in_place(tmp_path):
+    import shutil
+    import tomllib
+
+    import pytest
+
+    from yt_jp_redub.config import DEFAULTS, ROOT, BadSetting, Config, _ns, current_settings, save_settings
+
+    toml, env = tmp_path / "config.toml", tmp_path / ".env"
+    shutil.copy(ROOT / "config.example.toml", toml)
+    env.write_bytes(b"# my keys\r\nLLM_API_KEY=old\r\nLLM_MODEL=a\r\n")
+    cfg = Config(**{k: _ns(v) for k, v in DEFAULTS.items()}, config_file=toml, env_file=env)
+    cfg.secrets.llm_api_key, cfg.secrets.llm_model = "old", "a"
+    before = toml.read_bytes()
+
+    with pytest.raises(BadSetting) as e:
+        save_settings(cfg, {"port": "80", "max_height": "720"})
+    assert e.value.name == "port" and toml.read_bytes() == before  # nothing written
+
+    changed = save_settings(
+        cfg,
+        {"port": "8790", "max_height": "720", "low_vram": "false", "cap_gb": "50", "llm_api_key": ""}
+        | {"llm_model": "my model", "cookies_file": ""},
+    )
+    assert sorted(changed) == ["llm_model", "low_vram", "max_height", "port"]
+    text = toml.read_bytes().decode()
+    assert "port = 8790               # 8765 is AnkiConnect's" in text  # the comment stays in its column
+    assert text.count("\n") == text.count("\r\n")  # and the file's line endings
+    data = tomllib.loads(text)
+    assert data["server"]["port"] == 8790 and data["server"]["low_vram"] is False
+    assert data["download"]["max_height"] == 720
+    assert env.read_bytes() == b"# my keys\r\nLLM_API_KEY=old\r\nLLM_MODEL='my model'\r\n"  # the key kept
+    assert cfg.server.port == 8790 and cfg.secrets.llm_model == "my model"
+    assert current_settings(cfg)["llm_api_key"] is True and current_settings(cfg)["low_vram"] == "false"
+    assert save_settings(cfg, {"port": 8790}) == []  # unchanged values aren't written

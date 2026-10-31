@@ -64,14 +64,14 @@ ERROR_HINTS = (
     (
         "confirm you",
         "YouTube asked to confirm you're not a bot",
-        "Set cookies_file in config.toml (see the README), then retry.",
+        "Set a cookies file in the library's settings (see the README), then retry.",
     ),
     ("private video", "The video is private", ""),
     ("video unavailable", "The video isn't available (removed, private or region-locked)", ""),
     (
         "members-only",
         "The video is for channel members only",
-        "Set cookies_file in config.toml (see the README), then retry.",
+        "Set a cookies file in the library's settings (see the README), then retry.",
     ),
     ("out of memory", "The GPU ran out of memory", "Close other programs using the GPU, then retry."),
 )

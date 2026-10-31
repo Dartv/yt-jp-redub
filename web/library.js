@@ -129,6 +129,47 @@ paste.addEventListener("click", async () => {
   urlInput.focus();
 });
 
+// settings: saved into config.toml and .env, editable only on the PC (the server checks too)
+const settings = document.getElementById("settings"),
+  sform = document.getElementById("settingsForm"),
+  serror = document.getElementById("settingsError");
+document.getElementById("gear").addEventListener("click", async () => {
+  const r = await fetch("/api/settings", { cache: "no-store" }).catch(() => null);
+  if (!r || !r.ok) return alert(r ? await errorText(r) : "The server isn't reachable");
+  const s = await r.json();
+  for (const el of sform.elements) {
+    if (el.name) el.value = el.name === "llm_api_key" ? "" : s[el.name];
+    el.setCustomValidity?.("");
+  }
+  sform.elements.llm_api_key.placeholder = s.llm_api_key ? "Saved (type a new one to replace it)" : "Not set";
+  document.getElementById("fields").disabled = !s.editable;
+  document.getElementById("readonly").hidden = s.editable;
+  document.getElementById("saveSettings").hidden = !s.editable;
+  serror.textContent = "";
+  settings.showModal();
+});
+sform.addEventListener("input", (e) => e.target.setCustomValidity?.(""));
+sform.addEventListener("submit", async (e) => {
+  if (e.submitter?.value !== "save") return; // Close (or Escape) just closes it
+  e.preventDefault();
+  const r = await fetch("/api/settings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(new FormData(sform))),
+  }).catch(() => null);
+  if (!r || !r.ok) {
+    const err = r ? await r.clone().json().catch(async () => ({ error: await errorText(r) })) : {};
+    const field = err.field && sform.elements[err.field];
+    if (field) {
+      field.setCustomValidity(err.error);
+      field.reportValidity();
+    } else serror.textContent = err.error || "The server isn't reachable";
+    return;
+  }
+  settings.close();
+  if ((await r.json()).restart) alert("Saved. Restart yt-jp-redub to use the new port.");
+});
+
 fetch("/api/info")
   .then((r) => r.json())
   .then((info) => {

@@ -12,7 +12,7 @@ from urllib.parse import quote
 from aiohttp import web
 
 from .. import qr
-from ..config import ROOT, Config
+from ..config import ROOT, BadSetting, Config, current_settings, save_settings
 from ..models import VID_RE, is_youtube
 from ..net import public_base
 from ..pipeline import hls
@@ -160,11 +160,41 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
         n = await asb.send_subtitles(vid, force=True)
         return web.json_response({"clients": n})
 
+    def on_this_pc(req) -> bool:
+        """A browser on this PC (from loopback, or from the LAN address it was reached at), on this
+        server's own page. The Host check keeps out other websites reaching it through a domain name
+        that points at this PC."""
+        here = {"127.0.0.1", "::1", req.transport and req.transport.get_extra_info("sockname")[0]}
+        own = req.headers.get("Origin", f"http://{req.host}") == f"http://{req.host}"
+        return req.remote in here and req.url.host in here | {"localhost"} and own
+
+    async def api_settings(req):
+        return web.json_response({**current_settings(cfg), "editable": on_this_pc(req)}, headers=NO_STORE)
+
+    async def api_save_settings(req):
+        if not on_this_pc(req):
+            raise web.HTTPForbidden(text="Settings can be changed only on the PC that runs yt-jp-redub")
+        if req.content_type != "application/json":  # a cross-site form can't send JSON without asking
+            raise web.HTTPUnsupportedMediaType(text="expected JSON")
+        data = await json_body(req)
+        try:
+            changed = save_settings(cfg, dict(data))
+        except BadSetting as e:
+            return web.json_response({"error": str(e), "field": e.name}, status=400)
+        except OSError as e:
+            return web.json_response({"error": f"The settings couldn't be saved: {e}"}, status=500)
+        worker.models.settings_changed(changed)
+        if changed:
+            log.info("Settings changed: %s", ", ".join(changed))
+        return web.json_response({"changed": changed, "restart": "port" in changed})
+
     async def qr_code(_):
         return web.Response(text=qr.svg(base() + "/"), content_type="image/svg+xml", headers=NO_STORE)
 
     r.add_get("/qr.svg", qr_code)
     r.add_get("/api/info", api_info)
+    r.add_get("/api/settings", api_settings)
+    r.add_post("/api/settings", api_save_settings)
     r.add_post("/api/jobs", api_submit)
     r.add_get("/api/jobs", api_list)
     r.add_get(f"/api/jobs/{{vid:{VID_RE}}}", api_status)

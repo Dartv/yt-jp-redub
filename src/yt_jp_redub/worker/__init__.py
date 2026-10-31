@@ -60,6 +60,7 @@ class Models:
 
     def __init__(self, cfg: Config):
         self.cfg = cfg
+        self._old_translators = []
 
     @cached_property
     def separator(self):
@@ -119,7 +120,16 @@ class Models:
             sys.modules["torch"].cuda.empty_cache()
         log.info("Models unloaded%s", f" ({stage})" if stage else "")
 
+    def settings_changed(self, names: list[str]) -> None:
+        """After the settings dialog: a new translation provider is used from the next batch, and low
+        VRAM mode is worked out again for the next video."""
+        self.__dict__.pop("low_vram", None)
+        if any(n.startswith("llm_") for n in names) and "translator" in self.__dict__:
+            self._old_translators.append(self.__dict__.pop("translator"))  # a batch may still be using it
+
     async def close(self) -> None:
+        for t in self._old_translators:
+            await t.close()
         if "translator" in self.__dict__:
             await self.translator.close()
         if "tts" in self.__dict__:
@@ -280,8 +290,8 @@ class Worker:
                 [v for v in done if self.status(v)["ready"] and not self.paths(v).dub_audio.exists()]
             )
         )
-        idle = self.cfg.server.unload_after_min * 60
         while True:
+            idle = self.cfg.server.unload_after_min * 60
             pending = self.db.pending_jobs()
             if not pending:
                 self._wake.clear()
