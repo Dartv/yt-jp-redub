@@ -25,17 +25,20 @@ max_line_chars = 120      # English characters per subtitle line
 max_line_sec = 9.0
 pause_split_sec = 0.5     # a pause this long ends a line
 chunk_sec = 60            # target dub chunk length, split at silences
+first_chunk_sec = 15      # the first chunks are shorter (doubling up to chunk_sec), so playback starts sooner
 
 [translate]
 backend = "openai"        # "openai" (any OpenAI-compatible API) or "mock"
 batch_lines = 40
 concurrency = 3           # batches translated in parallel (within the rpm limit)
-context_lines = 8
-rpm = 25                  # requests per minute limit
-tpm = 14000               # tokens per minute limit (rough estimate on our side)
+context_lines = 16
+rpm = 0                   # requests per minute; 0 = the provider's published limit (Google AI Studio free
+                          # tier: 25, xAI: 2000), no limit for others (HTTP 429 answers are retried)
+tpm = 0                   # tokens per minute (rough estimate on our side); 0 = as for rpm
 max_retries = 20
 temperature = 0.4
-reasoning_effort = "low"  # for thinking models; "" to leave the model's default
+reasoning_effort = "none" # for thinking models: "none" answers 4-10x faster and translated as well in a
+                          # blind comparison with "low"; "" leaves the model's default
 
 [separate]
 backend = "demucs"        # "demucs" or "mock"
@@ -49,12 +52,13 @@ lang = "JA"
 max_speedup = 1.25        # lines are spoken up to this much faster to fit the original slot
 max_slowdown = 1.2        # ...or this much slower, so speech fills the time the original took
 group_speakers = true     # voice a speaker's consecutive sentences as one utterance (smoother)
-speaker_sim = 0.55        # voice similarity needed to treat adjacent lines as the same speaker
+speaker_sim = 0.6         # voice similarity needed to treat adjacent lines as the same speaker
 group_gap_sec = 0.4
 group_max_sec = 12
 min_ref_sec = 3.0         # shorter reference audio is padded with neighbouring audio
 use_bf16 = true
 emo_alpha = 1.0
+num_beams = 1             # IndexTTS search width: 1 is ~20% faster than 3 with the same intelligibility
 
 [stream]
 head_start_sec = 120      # playback starts once this much past the start point is dubbed

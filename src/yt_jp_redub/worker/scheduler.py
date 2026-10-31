@@ -43,6 +43,10 @@ class ChunkScheduler:
                 out.append(c)
         return out
 
+    def urgent(self, video_id: str, n_chunks: int) -> set[int]:
+        """The playhead chunk and the lookahead after it: someone is about to watch them."""
+        return set(self.order(video_id, n_chunks)[: self.lookahead + 1])
+
     def next(self, video_id: str, n_chunks: int, done: set[int], eligible) -> int | None:
         for c in self.order(video_id, n_chunks):
             if c not in done and eligible(c):

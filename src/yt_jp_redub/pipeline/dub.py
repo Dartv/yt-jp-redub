@@ -18,10 +18,15 @@ import soundfile as sf
 from ..models import Chunk, Line, LinesDoc, VideoPaths
 from . import ff
 from .pace import PaceModel
+from .segment import continues
+from .speakable import speakable
 
 log = logging.getLogger(__name__)
 
-GAP = 0.06  # minimum silence between consecutive utterances
+GAP = 0.06  # minimum silence between consecutive utterances of one speaker
+CROSSTALK = 0.4  # how far a take may start over the end of another speaker's
+MAX_CATCH_UP = 1.15  # extra speed-up (atempo) for a take that would run into the next line
+SENTENCE_GAP = 1.0  # the lines of one sentence this close together are voiced as one take
 CTX = 1.0  # extra audio given to Demucs on both sides of a chunk
 
 
@@ -43,30 +48,57 @@ class Utterance:
 
     @property
     def text(self) -> str:
-        return "".join(l.ja.strip() for l in self.lines)
+        """What the voice says (digits and symbols spelled out)."""
+        return speakable("".join(l.ja.strip() for l in self.lines))
 
 
-def group_utterances(lines: list[Line], vocals16k: np.ndarray, offset: float, cfg) -> list[Utterance]:
-    """Merges adjacent lines when the gap is short and the voices clearly match."""
-    utts = [Utterance([l]) for l in lines]
-    if not cfg.group_speakers or len(lines) < 2:
-        return utts
+Embeddings = dict[int, np.ndarray]  # line id -> unit speaker embedding (near-silent lines have none)
+MERGE_MIN_SEC = 0.8  # a line must be this long to tell its speaker reliably enough to merge it
+
+
+def line_embeddings(lines: list[Line], vocals16k: np.ndarray, offset: float) -> Embeddings:
+    """Who speaks each line, from that line's own audio only: in fast dialogue anything around it
+    is the other speaker. A short line's audio is repeated to the length the model needs, which
+    is good enough to find its speaker's other lines. Empty when the speaker model is unavailable."""
     from . import speaker
 
     if not speaker.available():
+        return {}
+    out = {}
+    for l in lines:
+        own = vocals16k[int(max(0.0, l.start - offset) * 16000) : int(max(0.0, l.end - offset) * 16000)]
+        if len(own) < 0.25 * 16000:
+            continue
+        e = speaker.embed(np.tile(own, -(-16000 // len(own))))
+        if e is not None:
+            out[l.id] = e
+    return out
+
+
+def _same_speaker(embs: Embeddings, a: int, b: int, sim: float) -> bool:
+    return a in embs and b in embs and float(embs[a] @ embs[b]) >= sim
+
+
+def group_utterances(lines: list[Line], embs: Embeddings, cfg) -> list[Utterance]:
+    """Merges adjacent lines into one take: the lines of one sentence (Japanese word order moves words
+    between them, so only the whole sentence fits its time), and lines of one speaker when the gap
+    is short and the voices clearly match."""
+    utts = [Utterance([l]) for l in lines]
+    if not cfg.group_speakers or not utts:
         return utts
-
-    def emb(l: Line):
-        a, b = int((l.start - offset) * 16000), int((l.end - offset) * 16000)
-        return speaker.embed(vocals16k[max(0, a) : max(0, b)])
-
-    embs = {l.id: emb(l) for l in lines}
     out = [utts[0]]
     for u in utts[1:]:
-        prev = out[-1]
-        a, b = embs[prev.lines[-1].id], embs[u.id]
-        same = a is not None and b is not None and float(a @ b) >= cfg.speaker_sim
-        if same and u.start - prev.end <= cfg.group_gap_sec and u.end - prev.start <= cfg.group_max_sec:
+        prev, a, b = out[-1], out[-1].lines[-1], u.lines[0]
+        gap = u.start - prev.end
+        # ASR often drops the full stop after an exclamation: a "continuation" in another voice isn't one
+        other = a.id in embs and b.id in embs and not _same_speaker(embs, a.id, b.id, cfg.speaker_sim)
+        sentence = continues(a) and gap <= SENTENCE_GAP and not other
+        same = (
+            gap <= cfg.group_gap_sec
+            and min(a.end - a.start, b.end - b.start) >= MERGE_MIN_SEC
+            and _same_speaker(embs, a.id, b.id, cfg.speaker_sim)
+        )
+        if (sentence or same) and u.end - prev.start <= cfg.group_max_sec:
             prev.lines.extend(u.lines)
         else:
             out.append(u)
@@ -100,13 +132,17 @@ def _envelope_db(x: np.ndarray, sr: int, hop: float = ENV_HOP) -> np.ndarray:
     return 20 * np.log10(e)
 
 
-def _trim_silence(wav: np.ndarray, sr: int, thresh_db: float = -50.0) -> np.ndarray:
-    """Drops leading/trailing near-silence but keeps breath and decay around the speech."""
-    mono = np.abs(wav).max(axis=1) if wav.ndim == 2 else np.abs(wav)
-    loud = np.where(mono > 10 ** (thresh_db / 20))[0]
-    if len(loud) == 0:
+def _trim_silence(wav: np.ndarray, sr: int, below_peak_db: float = 35.0) -> np.ndarray:
+    """Drops what comes before and after the speech: silence, and the low breath and noise TTS
+    often puts first (a median 0.2 s on IndexTTS-2.5, which adds up in fast dialogue). Speech is
+    where the 10 ms loudness is within `below_peak_db` of the utterance's peak; a little attack and
+    decay around it are kept."""
+    hop = int(0.01 * sr)
+    env = _envelope_db(wav.mean(axis=1) if wav.ndim == 2 else wav, sr, 0.01)
+    if not len(env):
         return wav
-    return wav[max(0, loud[0] - int(0.03 * sr)) : loud[-1] + int(0.08 * sr)]
+    loud = np.where(env > max(-50.0, float(env.max()) - below_peak_db))[0]
+    return wav[max(0, loud[0] * hop - int(0.03 * sr)) : (loud[-1] + 1) * hop + int(0.08 * sr)]
 
 
 def _fade(wav: np.ndarray, sr: int, fade_in: float = 0.012, fade_out: float = 0.05) -> np.ndarray:
@@ -178,27 +214,27 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     n = len(orig)
     vocals, background = _separate(paths, chunk, separator, sr, n)
     vocals16k = ff.resample(vocals.mean(axis=1, keepdims=True), sr, 16000)[:, 0]
-    utts = group_utterances(lines, vocals16k, chunk.start, cfg.tts)
-    refs = _write_references(utts, vocals, sr, chunk, cdir / "refs", cfg.tts.min_ref_sec)
+    embs = line_embeddings(lines, vocals16k, chunk.start)
+    utts = group_utterances(lines, embs, cfg.tts)
+    refs = _write_references(utts, vocals, sr, chunk, cdir / "refs", embs, cfg.tts)
     (cdir / "tts").mkdir(exist_ok=True)
 
-    voice = np.zeros((n, 1), dtype=np.float32)
     env_db = _envelope_db(vocals.mean(axis=1), sr)
-    cursor = 0.0
+    takes = []
     for k, u in enumerate(utts):
         rel = u.start - chunk.start
         next_start = utts[k + 1].start - chunk.start if k + 1 < len(utts) else chunk.duration
-        # after a spill this starts late, and pacing below makes it catch up
-        start = max(rel, cursor + (GAP if cursor else 0.0))
         speech_end = _speech_end(env_db, ENV_HOP, rel, u.end - chunk.start, next_start - GAP)
-        target = max(0.3, min(speech_end, next_start - GAP) - start)  # the time the original took
+        target = max(0.3, min(speech_end, next_start - GAP) - rel)  # the time the original took
         wav, tsr = _fit(
             tts, u, refs[u.id], cdir / "tts" / f"{u.id:05d}-{len(u.lines)}.wav", target, pace, cfg.tts
         )
-        wav = _match_loudness(
-            ff.resample(wav, tsr, sr), vocals[int(rel * sr) : int((u.end - chunk.start) * sr)]
+        takes.append(
+            _match_loudness(
+                ff.resample(wav, tsr, sr), vocals[int(rel * sr) : int((u.end - chunk.start) * sr)]
+            )
         )
-        cursor = _place(voice, wav, sr, start, rel, chunk.duration, cdir, u.id)
+    voice = _lay_out(utts, takes, sr, n, chunk, embs, cfg.tts, cdir)
 
     mix = background + np.repeat(voice, 2, axis=1)
     peak = float(np.abs(mix).max())
@@ -209,20 +245,83 @@ def dub_chunk(paths: VideoPaths, doc: LinesDoc, chunk: Chunk, separator, tts, cf
     return out_path
 
 
+def _lay_out(
+    utts: list[Utterance],
+    takes: list[np.ndarray],
+    sr: int,
+    n: int,
+    chunk: Chunk,
+    embs: Embeddings,
+    cfg,
+    tmp_dir,
+) -> np.ndarray:
+    """The chunk's voice track: each take at its line's original onset. In fast dialogue the takes
+    need more time than the lines took, so a delay would build up line after line: instead a take
+    may start over the end of the previous speaker's (people talk over each other in an argument),
+    and a take that would run into the next line is sped up to make the time."""
+
+    def other_speaker(k: int) -> bool:  # takes k-1 and k are clearly different voices
+        a, b = utts[k - 1].lines[-1].id, utts[k].lines[0].id
+        return a in embs and b in embs and not _same_speaker(embs, a, b, cfg.speaker_sim)
+
+    voice = np.zeros((n, 1), dtype=np.float32)
+    cursor = 0.0
+    for k, (u, wav) in enumerate(zip(utts, takes, strict=True)):
+        rel = u.start - chunk.start
+        start = rel if k == 0 else max(rel, cursor - (CROSSTALK if other_speaker(k) else -GAP))
+        if k + 1 < len(utts):
+            room = utts[k + 1].start - chunk.start - start + (CROSSTALK if other_speaker(k + 1) else -GAP)
+            if len(wav) / sr > room * 1.03:
+                wav = _time_stretch(wav, sr, min(MAX_CATCH_UP, len(wav) / sr / max(room, 0.1)), tmp_dir)
+        cursor = _place(voice, wav, sr, start, rel, chunk.duration, tmp_dir, u.id)
+    return voice
+
+
 def _write_references(
-    utts: list[Utterance], vocals: np.ndarray, sr: int, chunk: Chunk, refs_dir: Path, min_sec: float
+    utts: list[Utterance],
+    vocals: np.ndarray,
+    sr: int,
+    chunk: Chunk,
+    refs_dir: Path,
+    embs: Embeddings,
+    cfg,
 ) -> dict[int, Path]:
-    """Each utterance's own original vocals; quiet or very short ones borrow the nearest usable one."""
+    """Each utterance's own original vocals as its voice reference. A short one is topped up to
+    min_ref_sec with the same speaker's nearest other speech, a quiet one uses that speech alone:
+    never with the audio right next to it, which in fast dialogue is the other speaker. Without
+    speaker embeddings, the neighbouring audio is all there is."""
     refs_dir.mkdir(exist_ok=True)
-    clips = {u.id: _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, min_sec) for u in utts}
-    usable = [u for u in utts if ff.rms_db(clips[u.id]) > -38 and len(clips[u.id]) > sr]
+    own = {u.id: _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, 0.0) for u in utts}
+    loud = {u.id for u in utts if ff.rms_db(own[u.id]) > -38}
+    gap = np.zeros((int(0.15 * sr), vocals.shape[1]), dtype=vocals.dtype)
     out = {}
     for u in utts:
-        src = u if u in usable or not usable else min(usable, key=lambda g: abs(g.start - u.start))
-        p = refs_dir / f"{src.id:05d}.wav"
-        if not p.exists():
-            ff.write_wav(p, clips[src.id], sr)
-        out[u.id] = p
+        p = out[u.id] = refs_dir / f"{u.id:05d}.wav"
+        if p.exists():
+            continue
+        speaker_id = u.lines[0].id
+        parts = [own[u.id]] if u.id in loud else []
+        if u.id in loud and len(own[u.id]) >= cfg.min_ref_sec * sr:
+            clip = own[u.id]
+        elif speaker_id in embs:
+            same = sorted(
+                (
+                    g
+                    for g in utts
+                    if g is not u
+                    and g.id in loud
+                    and _same_speaker(embs, speaker_id, g.lines[0].id, cfg.speaker_sim)
+                ),
+                key=lambda g: abs(g.start - u.start),
+            )
+            for g in same:
+                if sum(len(x) for x in parts) >= cfg.min_ref_sec * sr:
+                    break
+                parts += [gap, own[g.id]] if parts else [own[g.id]]
+            clip = np.concatenate(parts) if parts else own[u.id]
+        else:
+            clip = _reference(vocals, sr, u.start - chunk.start, u.end - chunk.start, cfg.min_ref_sec)
+        ff.write_wav(p, clip[: int(12 * sr)], sr)
     return out
 
 

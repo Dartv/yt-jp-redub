@@ -9,18 +9,35 @@ import time
 
 from ..models import Line, LinesDoc, VideoPaths
 from ..pipeline import subs
-from ..pipeline.translate import Retryable, char_budgets
+from ..pipeline.translate import Request, Retryable, char_budgets
 
 log = logging.getLogger(__name__)
 HEAD_BATCH = 12  # chunks about to be watched go out in small batches: latency follows output length
 HEAD_RETRY_CAP = 8  # max seconds between attempts at a batch someone is waiting for
 RETRY_CAP = 60
+GLOSSARY_LINES = 120  # transcript lines the glossary is drawn from
+
+
+async def _glossary(w, title: str, doc: LinesDoc) -> dict[str, str]:
+    """Names for every batch to agree on: from the start of the transcript and a sample of
+    the rest. Without it batches translate on their own (a failure here never stops a job)."""
+    lines = doc.lines[: GLOSSARY_LINES // 2]
+    rest = doc.lines[GLOSSARY_LINES // 2 :]
+    lines += rest[:: max(1, len(rest) // (GLOSSARY_LINES // 2))]
+    try:
+        return await w.models.translator.glossary(title, lines)
+    except Exception as e:
+        log.warning("no glossary for %s: %s", title, str(e)[:200])
+        return {}
 
 
 async def translate_video(w, vid: str, doc: LinesDoc) -> None:
-    """Fills line.ja for every line, saving lines.json and the subtitle files after each batch."""
+    """Fills line.ja for every line, saving lines.json and the subtitle files after each batch.
+    The chunks about to be watched go out right away; the rest wait for the glossary."""
     paths, cfg = w.paths(vid), w.cfg.translate
     budgets = char_budgets(doc.lines)  # how much Japanese fits each line's timing
+    title = w.db.get_job(vid)["title"] or ""  # helps make sense of misheard names and topics
+    glossary: asyncio.Task | None = None  # started once the first batches are out, which go first
     in_flight: set[int] = set()
     cooldown: dict[int, float] = {}  # line id -> when its failed batch may be sent again
     failures: dict[int, int] = {}  # first line id of a failing batch -> failed attempts
@@ -32,6 +49,7 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
         soon as its own batch returns. A failed batch rejoins the line here after a short pause,
         so it is retried ahead of less urgent chunks."""
         order, now = w.sched.order(vid, len(doc.chunks)), time.monotonic()
+        urgent = w.sched.urgent(vid, len(doc.chunks))
         for c in order:
             todo = [
                 i
@@ -40,7 +58,9 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
             ]
             if not todo:
                 continue
-            head = c in order[:2]
+            head = c in urgent
+            if not head and not (glossary and glossary.done()):
+                return None
             size = min(cfg.batch_lines, HEAD_BATCH) if head else cfg.batch_lines
             batch = [doc.lines[todo[0]]]
             for i in todo[1:size]:
@@ -56,14 +76,21 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
         return min(waits) if waits else None
 
     async def run_batch(batch: list[Line], head: bool) -> None:
-        first = batch[0].id
+        first, last = batch[0].id, batch[-1].id + 1
+        req = Request(
+            batch,
+            before=doc.lines[max(0, first - cfg.context_lines) : first],
+            after=doc.lines[last : last + cfg.context_lines],
+            budgets=budgets,
+            title=title,
+            glossary=glossary.result() if glossary and glossary.done() else {},
+            urgent=head,
+            timeout=60 + 3 * len(batch),  # replies take time in proportion to their length
+        )
+        ok = False
         try:
-            result = await w.models.translator.translate(
-                batch,
-                doc.lines[max(0, first - cfg.context_lines) : first],
-                budgets,
-                timeout=60 + 3 * len(batch),  # replies take time in proportion to their length
-            )
+            result = await w.models.translator.translate(req)
+            ok = True
         except Retryable as e:
             n = failures[first] = failures.get(first, 0) + 1
             if n > cfg.max_retries:
@@ -81,6 +108,7 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
             return
         finally:
             in_flight.difference_update(l.id for l in batch)
+            w.clock.translated(batch, ok)
         failures.pop(first, None)
         for l in batch:
             l.ja = result[l.id]
@@ -94,8 +122,16 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
         while True:
             while len(running) < max(1, cfg.concurrency) and (picked := next_batch()):
                 in_flight.update(l.id for l in picked[0])
+                w.clock.translating(*picked)
                 running.add(asyncio.create_task(run_batch(*picked)))
+            if glossary is None:
+                glossary = asyncio.create_task(_glossary(w, title, doc))
             retry_at = next_retry()
+            if not running and not glossary.done():  # the rest of the video waits for it
+                await asyncio.wait(
+                    [glossary], timeout=None if retry_at is None else max(0.05, retry_at - time.monotonic())
+                )
+                continue
             if not running and retry_at is None:
                 break
             wait = None if retry_at is None else max(0.05, retry_at - time.monotonic())
@@ -106,6 +142,8 @@ async def translate_video(w, vid: str, doc: LinesDoc) -> None:
             for t in done:
                 t.result()
     finally:
+        if glossary:
+            glossary.cancel()
         for t in running:
             t.cancel()
 

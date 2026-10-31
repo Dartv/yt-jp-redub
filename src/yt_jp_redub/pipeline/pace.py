@@ -14,9 +14,19 @@ def spoken_len(text: str) -> int:
     return sum(1 for ch in text if not ch.isspace() and ch not in _SILENT) or 1
 
 
-def char_budget(seconds: float, speedup: float = 1.15) -> int:
-    """How many characters fit in `seconds` at a natural pace, with a little speed-up allowed."""
-    return max(3, int((seconds * speedup - BASE_SEC) / SEC_PER_CHAR))
+def max_speech_sec(text: str) -> float:
+    """The longest a TTS take of `text` may plausibly need: anything longer is the model running
+    on (on 1-3 kana interjections IndexTTS tends to babble on, or drift into English)."""
+    drawn_out = sum(text.count(ch) for ch in "ー～〜")  # not counted in spoken_len, but they take time
+    return 0.6 + 0.2 * (spoken_len(text) + drawn_out)
+
+
+def char_range(seconds: float, speedup: float = 1.15) -> tuple[int, int]:
+    """How many characters fill `seconds` at a natural pace: at most what fits with a little
+    speed-up, at least enough that the voice doesn't drag or stop early. Even a short retort gets
+    room for a complete form (してない)."""
+    most = max(5, int((seconds * speedup - BASE_SEC) / SEC_PER_CHAR))
+    return max(2, round(most * 0.6)), most
 
 
 class PaceModel:

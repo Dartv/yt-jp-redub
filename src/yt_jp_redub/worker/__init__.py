@@ -23,6 +23,7 @@ from ..models import LinesDoc, VideoPaths, Word, atomic_write_json, video_ref
 from ..pipeline import asr, download, export, ff, hls, segment, subs
 from ..pipeline.pace import PaceModel
 from .dubbing import dub_video
+from .eta import DubClock
 from .scheduler import ChunkScheduler
 from .status import job_status
 from .storage import enforce_cap
@@ -78,6 +79,7 @@ class Worker:
         self.models = Models(cfg)
         self.sched = ChunkScheduler(cfg.stream.lookahead_chunks)
         self.pace = PaceModel()
+        self.clock = DubClock()
         self.changed = asyncio.Condition()
         self.progress: dict[str, float] = {}  # fraction of the current stage
         self.current: str | None = None

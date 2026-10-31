@@ -6,10 +6,12 @@ import time
 
 import pytest
 
-from yt_jp_redub.models import VID_RE, Line, LinesDoc, Word, is_youtube, video_ref
+from yt_jp_redub.models import VID_RE, Chunk, Line, LinesDoc, Word, is_youtube, video_ref
 from yt_jp_redub.pipeline import hls, subs
 from yt_jp_redub.pipeline.asr import tokens_to_words
 from yt_jp_redub.pipeline.segment import lines_to_chunks, words_to_lines
+from yt_jp_redub.pipeline.speakable import speakable
+from yt_jp_redub.worker.eta import DubClock
 from yt_jp_redub.worker.scheduler import ChunkScheduler
 
 
@@ -85,9 +87,42 @@ def test_chunks_tile_timeline():
             assert c.start <= lines[i].start and lines[i].end <= c.end
 
 
+def test_first_chunks_are_short():
+    lines = [Line(i, i * 5.0, i * 5.0 + 4.0, f"line {i}") for i in range(60)]
+    chunks = lines_to_chunks(lines, 300.0, chunk_sec=60, first_sec=15)
+    lengths = [c.duration for c in chunks]
+    assert 10 <= lengths[0] < 25 and 25 <= lengths[1] < 40 and all(55 <= x < 70 for x in lengths[2:-1])
+
+
 def test_chunks_no_speech():
     chunks = lines_to_chunks([], 30.0)
     assert len(chunks) == 1 and chunks[0].end == 30.0
+
+
+def test_speakable_spells_out_numbers_and_symbols():
+    assert speakable("95%の処理") == "九十五パーセントの処理"
+    assert speakable("賞金10,000ドル") == "賞金一万ドル"
+    assert speakable("３.５倍、2026年") == "三点五倍、二千二十六年"
+    assert speakable("十二A号室でAFK") == "十二エー号室でエーエフケー"
+    assert speakable("一九六〇年代") == "千九百六十年代"
+    assert speakable("Minecraftで") == "Minecraftで"  # words are left to the voice
+
+
+def test_eta_follows_dub_order_and_translation():
+    lines = [Line(i, i * 10.0, i * 10.0 + 5.0, f"l{i}", ja="あ" if i < 2 else None) for i in range(3)]
+    doc = LinesDoc(30.0, lines, [Chunk(i, i * 10.0, i * 10.0 + 10, [i]) for i in range(3)])
+    clock = DubClock(sec_per_speech=1.0, urgent_sec=5.0, other_sec=20.0)
+    eta = clock.ready_in("v", doc, done={0}, order=[0, 1, 2], urgent={0, 1})
+    assert 0 not in eta and eta[1] == pytest.approx(5.0)
+    assert eta[2] == pytest.approx(25.0)  # waits for its (not urgent) translation, then 5 s of speech
+    clock.translating([lines[2]], urgent=True)  # its batch went out as urgent
+    assert clock.ready_in("v", doc, done={0}, order=[0, 1, 2], urgent={0, 1, 2})[2] == pytest.approx(10.0)
+    clock.sent[2] = (clock.sent[2][0] - 40, True)  # sent 40 s ago: overdue, so not "any moment now"
+    assert clock.ready_in("v", doc, done={0}, order=[0, 1, 2], urgent={0, 1, 2})[2] == pytest.approx(
+        25.0, abs=0.1
+    )
+    clock.dubbed(doc, doc.chunks[1], 10.0)  # slower than expected: estimates go up
+    assert clock.sec_per_speech > 1.0
 
 
 def test_scheduler_priority():
@@ -205,8 +240,9 @@ def _translation_worker(tmp_path, translator, max_retries=5, concurrency=2):
         paths=lambda vid: VideoPaths(tmp_path, vid),
         sched=ChunkScheduler(1),
         models=SimpleNamespace(translator=translator),
-        db=SimpleNamespace(update_job=lambda *a, **k: None),
+        db=SimpleNamespace(update_job=lambda *a, **k: None, get_job=lambda vid: {"title": "A video"}),
         notify=lambda vid: None,
+        clock=DubClock(),
     )
     return w, doc
 
@@ -217,17 +253,20 @@ class _FlakyTranslator:
     def __init__(self, fails):
         self.fails, self.calls = fails, []
 
-    async def translate(self, batch, context, budgets=None, timeout=None):
+    async def translate(self, req):
         import asyncio
 
         from yt_jp_redub.pipeline.translate import Retryable
 
-        self.calls.append(batch[0].id)
-        if batch[0].id == 0 and self.fails:
+        self.calls.append(req.batch[0].id)
+        if req.batch[0].id == 0 and self.fails:
             self.fails -= 1
             raise Retryable("HTTP 500")
         await asyncio.sleep(0.05)
-        return {l.id: f"ja {l.id}" for l in batch}
+        return {l.id: f"ja {l.id}" for l in req.batch}
+
+    async def glossary(self, title, lines):
+        return {}
 
 
 def test_failed_head_batch_is_retried_first(tmp_path, monkeypatch):
@@ -260,6 +299,28 @@ def test_translation_gives_up_after_max_retries(tmp_path, monkeypatch):
         asyncio.run(translation.translate_video(w, "vidvidvidvi", doc))
 
 
+def test_rate_limiter_waits_only_until_enough_expires():
+    from yt_jp_redub.pipeline.translate import RateLimiter
+
+    lim = RateLimiter(rpm=4, tpm=10_000)
+    lim.events.extend([(100.0, 6000), (110.0, 3000), (120.0, 500)])
+    assert lim._wait(500, now=125.0) == 0  # 10000 tokens, 4 requests: fits
+    assert lim._wait(2000, now=125.0) == 35.0  # once the 6000-token request (t=100) leaves the window
+    assert lim._wait(9500, now=125.0) == 45.0  # needs the first two gone (t=110 leaves at 170)
+    lim.rpm = 3
+    assert lim._wait(10, now=125.0) == 35.0  # out of requests, not tokens
+
+
+def test_rate_limits_follow_the_provider():
+    from yt_jp_redub.pipeline.translate import UNLIMITED, api_limits
+
+    google = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    assert api_limits(google, 0, 0) == (25, 14_000)
+    assert api_limits("https://api.x.ai/v1/chat/completions", 0, 0) == (2_000, 10_000_000)
+    assert api_limits("http://localhost:11434/v1/chat/completions", 0, 0) == UNLIMITED
+    assert api_limits(google, 10, 5000) == (10, 5000)  # config.toml wins
+
+
 def test_reasoning_effort_falls_back_when_rejected():
     import asyncio
     import json
@@ -267,7 +328,7 @@ def test_reasoning_effort_falls_back_when_rejected():
 
     from aiohttp import web
 
-    from yt_jp_redub.pipeline.translate import OpenAITranslator
+    from yt_jp_redub.pipeline.translate import OpenAITranslator, Request
 
     bodies = []
 
@@ -291,7 +352,7 @@ def test_reasoning_effort_falls_back_when_rejected():
         tr = OpenAITranslator(f"http://127.0.0.1:{port}/v1", "key", "m", cfg)
         try:
             for _ in range(2):
-                assert await tr.translate([Line(0, 0, 1, "Hello")], [], timeout=10) == {0: "こんにちは"}
+                assert await tr.translate(Request([Line(0, 0, 1, "Hello")], timeout=10)) == {0: "こんにちは"}
         finally:
             await tr.close()
             await runner.cleanup()

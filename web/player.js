@@ -28,7 +28,6 @@ let showJa = true,
   speed = 1, // playback rate
   subScale = 1, // subtitle size
   tracksAdded = false;
-let rate = { t: Date.now(), done: 0, secPerChunk: null };
 // where playback starts: ?t= if given, else where it was left off (set from the first status)
 let startAt = params.has("t") ? parseFloat(params.get("t")) || 0 : null;
 let positioned = false; // playback has reached startAt, so the position is worth saving
@@ -84,16 +83,32 @@ function dubbedUntil(t) {
   while (i < c.length && c[i][2]) i++;
   return i >= c.length ? status.duration : c[i][0];
 }
-function needAhead(t) {
-  return Math.min(info.head_start_sec, Math.max(0, (status.duration || 0) - t - 0.5));
+// The server estimates when each chunk will be dubbed; the estimates are rough, so they get a margin.
+const ETA_MARGIN = 1.2,
+  ETA_SLACK = 3;
+/** Seconds to wait before playback from t, at the current speed, can run to the end without
+ * catching up with the dub (Infinity while the server can't tell yet). */
+function waitNeeded(t) {
+  const c = status.chunks;
+  let wait = 0;
+  for (let i = chunkIndexAt(t); i < c.length; i++) {
+    if (c[i][2]) continue;
+    if (c[i][3] == null) return Infinity;
+    wait = Math.max(wait, c[i][3] * ETA_MARGIN + ETA_SLACK - Math.max(0, c[i][0] - t) / speed);
+  }
+  return wait;
+}
+/** Playback from t may go on: by the estimates it won't catch up with the dub, or at least `lead`
+ * seconds past t are dubbed (when the dub is slower than playback, waiting for all of it would
+ * take too long). */
+function canPlay(t, lead) {
+  const until = dubbedUntil(t);
+  if (until >= status.duration - 0.5) return true;
+  return until - t >= Math.min(lead, status.duration - t - 0.5) || (until - t >= 1.5 && waitNeeded(t) <= 0);
 }
 function etaText(t) {
-  const c = status.chunks;
-  let missing = 0;
-  for (let i = chunkIndexAt(t); i < c.length && c[i][0] < t + needAhead(t) && missing < 50; i++)
-    if (!c[i][2]) missing++;
-  if (!rate.secPerChunk || !missing) return "";
-  return `ready in ~${Math.ceil(missing * rate.secPerChunk)} s`;
+  const w = waitNeeded(t);
+  return w > 0 && w < Infinity ? `ready in ~${Math.ceil(w)} s` : "";
 }
 
 // ------------------------------------------------------------------ status polling
@@ -106,7 +121,6 @@ async function poll() {
 }
 
 function onStatus(s) {
-  const prevDone = status ? status.chunks_done : 0;
   status = s;
   if (startAt === null) {
     const r = s.resume_at || 0;
@@ -115,11 +129,6 @@ function onStatus(s) {
   document.title = (s.title || vid) + " · yt-jp-redub";
   $("title").textContent = $("topTitle").textContent = s.title || "";
   $("title").href = $("topTitle").href = s.url;
-  if (s.chunks_done > prevDone) {
-    const now = Date.now();
-    if (rate.done) rate.secPerChunk = (now - rate.t) / 1000 / Math.max(1, s.chunks_done - rate.done);
-    rate = { t: now, done: s.chunks_done, secPerChunk: rate.secPerChunk };
-  }
   renderDubbed();
   renderStatus();
   renderDownload();
@@ -240,15 +249,13 @@ function maybeStart() {
     );
     return;
   }
-  const t = startAt,
-    until = dubbedUntil(t);
-  if (lang === "ja" && until - t < needAhead(t)) {
-    const have = Math.max(0, until - t),
-      eta = etaText(t);
-    let text = `${pct(have, needAhead(t))}% ready`;
+  const t = startAt;
+  if (lang === "ja" && !canPlay(t, info.head_start_sec)) {
+    const parts = [];
     if (status.total_lines && status.translated < status.total_lines)
-      text = `translating ${pct(status.translated, status.total_lines)}% · ` + text;
-    overlay("Dubbing the first part…", text + (eta ? " · " + eta : ""));
+      parts.push(`translating ${pct(status.translated, status.total_lines)}%`);
+    parts.push(etaText(t) || "starting soon");
+    overlay("Dubbing the first part…", parts.join(" · "));
     return;
   }
   started = true;
@@ -263,14 +270,12 @@ function checkCatchUp() {
   if (!status || lang !== "ja" || !started) return;
   const t = video.currentTime,
     until = dubbedUntil(t);
-  const remaining = (status.duration || 0) - t;
   if (!waitingDub && !video.paused && until < status.duration && until - t < 1.5) {
     waitingDub = true;
     video.pause();
   }
   if (waitingDub) {
-    const enough = until - t >= Math.min(30, remaining - 0.5) || until >= status.duration;
-    if (enough) {
+    if (canPlay(t, 30)) {
       waitingDub = false;
       hideOverlay();
       if (!userPaused) video.play().catch(() => overlay("Ready", "", { spin: false, play: true }));

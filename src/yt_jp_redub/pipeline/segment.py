@@ -9,6 +9,22 @@ CLAUSE_END = (",", ";", ":", "—", "-")
 ABBREV = {"mr.", "mrs.", "ms.", "dr.", "st.", "vs.", "jr.", "sr.", "e.g.", "i.e.", "etc.", "prof."}
 
 
+def continues(line: Line) -> bool:
+    """The line's sentence goes on in the next line (it was split for length or at a pause)."""
+    return not line.en.rstrip().endswith(SENT_END)
+
+
+def sentences(lines: list[Line]) -> list[list[Line]]:
+    """Consecutive lines grouped into the sentences they split."""
+    out: list[list[Line]] = []
+    for l in lines:
+        if out and continues(out[-1][-1]) and l.id == out[-1][-1].id + 1:
+            out[-1].append(l)
+        else:
+            out.append([l])
+    return out
+
+
 def words_to_lines(
     words: list[Word], max_chars: int = 90, max_sec: float = 7.0, pause_split: float = 0.5
 ) -> list[Line]:
@@ -57,9 +73,11 @@ def words_to_lines(
 
 
 def lines_to_chunks(
-    lines: list[Line], duration: float, chunk_sec: float = 60.0, min_gap: float = 0.3
+    lines: list[Line], duration: float, chunk_sec: float = 60.0, min_gap: float = 0.3, first_sec: float = 15.0
 ) -> list[Chunk]:
-    """Partitions [0, duration] into chunks whose boundaries fall in gaps between lines."""
+    """Partitions [0, duration] into chunks whose boundaries fall in gaps between lines. The first
+    chunks are shorter (first_sec, doubling up to chunk_sec), so playback from the start can begin
+    as soon as a few lines are dubbed."""
     chunks: list[Chunk] = []
     start = 0.0
     cur: list[Line] = []
@@ -67,9 +85,10 @@ def lines_to_chunks(
     while i < len(lines):
         cur.append(lines[i])
         nxt = lines[i + 1] if i + 1 < len(lines) else None
-        if nxt is not None and nxt.start - start >= chunk_sec:
+        target = min(chunk_sec, first_sec * 2 ** len(chunks))
+        if nxt is not None and nxt.start - start >= target:
             gap = nxt.start - lines[i].end
-            overdue = lines[i].end - start >= chunk_sec * 1.5
+            overdue = lines[i].end - start >= target * 1.5
             if gap >= min_gap or overdue:
                 # when overdue, cut at the largest gap in the last part of the chunk
                 if gap < min_gap:
@@ -99,4 +118,6 @@ def build(words: list[Word], duration: float, cfg) -> LinesDoc:
     lines = words_to_lines(words, cfg.max_line_chars, cfg.max_line_sec, cfg.pause_split_sec)
     for l in lines:
         l.end = min(l.end, duration)
-    return LinesDoc(duration, lines, lines_to_chunks(lines, duration, cfg.chunk_sec))
+    return LinesDoc(
+        duration, lines, lines_to_chunks(lines, duration, cfg.chunk_sec, first_sec=cfg.first_chunk_sec)
+    )

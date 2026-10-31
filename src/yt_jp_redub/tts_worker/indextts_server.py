@@ -5,7 +5,8 @@ Protocol: one JSON request per line on stdin, one JSON reply per line on the ori
 IndexTTS's own prints are redirected to stderr.
 
 Request:  {"id": 1, "text": "...", "ref": "ref.wav", "emo_ref": "ref.wav" | null, "out": "out.wav",
-           "lang": "JA", "duration_factor": 1.0, "emo_alpha": 1.0}
+           "lang": "JA", "duration_factor": 1.0, "emo_alpha": 1.0, "max_mel_tokens": 200 | null,
+           "num_beams": 1 | null}
 Reply:    {"id": 1, "ok": true, "sec": 0.83} or {"id": 1, "ok": false, "error": "..."}
 First line on startup: {"ready": true, "device": "cuda:0"}
 """
@@ -52,6 +53,9 @@ def main():
         if req.get("cmd") == "quit":
             break
         t0 = time.time()
+        # generation settings: a cap on the speech tokens keeps very short texts from running on into
+        # babble; one beam is ~20% faster than IndexTTS's default three at the same quality
+        gen = {k: int(req[k]) for k in ("max_mel_tokens", "num_beams") if req.get(k)}
         try:
             tts.infer(
                 spk_audio_prompt=req["ref"],
@@ -62,6 +66,7 @@ def main():
                 emo_alpha=float(req.get("emo_alpha", 1.0)),
                 duration_factor=float(req.get("duration_factor", 1.0)),
                 verbose=False,
+                **gen,
             )
             if not os.path.exists(req["out"]):
                 raise RuntimeError("no audio produced")

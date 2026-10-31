@@ -13,8 +13,11 @@ from pathlib import Path
 
 import numpy as np
 
+from .pace import max_speech_sec
+
 log = logging.getLogger(__name__)
 WORKER = Path(__file__).resolve().parents[1] / "tts_worker" / "indextts_server.py"
+MEL_TOKENS_PER_SEC = 50  # IndexTTS-2.5's speech tokens: 1.72 mel frames each at 22050 Hz / 256
 
 
 def _venv_python(project: Path) -> Path:
@@ -23,8 +26,15 @@ def _venv_python(project: Path) -> Path:
 
 
 class IndexTTSClient:
-    def __init__(self, indextts_dir: Path, lang: str = "JA", use_bf16: bool = True, emo_alpha: float = 1.0):
-        self.dir, self.lang, self.emo_alpha = indextts_dir, lang, emo_alpha
+    def __init__(
+        self,
+        indextts_dir: Path,
+        lang: str = "JA",
+        use_bf16: bool = True,
+        emo_alpha: float = 1.0,
+        num_beams: int = 1,
+    ):
+        self.dir, self.lang, self.emo_alpha, self.num_beams = indextts_dir, lang, emo_alpha, num_beams
         py = _venv_python(indextts_dir)
         if not py.exists():
             raise RuntimeError(f"IndexTTS environment not found at {indextts_dir} (run setup).")
@@ -75,7 +85,9 @@ class IndexTTSClient:
             "emo_ref": str(emo_ref.resolve()) if emo_ref else None,
             "lang": self.lang,
             "duration_factor": round(float(duration_factor), 3),
+            "max_mel_tokens": int(MEL_TOKENS_PER_SEC * max_speech_sec(text)),
             "emo_alpha": self.emo_alpha,
+            "num_beams": self.num_beams,
         }
         with self._lock:
             self.proc.stdin.write(json.dumps(req, ensure_ascii=False) + "\n")
@@ -119,4 +131,5 @@ class MockTTS:
 def make_tts(cfg):
     if cfg.tts.backend == "mock":
         return MockTTS()
-    return IndexTTSClient(cfg.indextts_dir, cfg.tts.lang, cfg.tts.use_bf16, cfg.tts.emo_alpha)
+    t = cfg.tts
+    return IndexTTSClient(cfg.indextts_dir, t.lang, t.use_bf16, t.emo_alpha, t.num_beams)

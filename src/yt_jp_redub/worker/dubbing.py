@@ -47,6 +47,7 @@ async def dub_video(w, vid: str, doc: LinesDoc, translation: asyncio.Task) -> No
             w.set_stage(vid, "dubbing")
         chunk, t0 = doc.chunks[c], time.time()
         speech = bool(chunk.line_ids)
+        w.clock.dubbing(vid, doc, chunk)
         wav = await asyncio.to_thread(
             dub_chunk,
             paths,
@@ -59,6 +60,7 @@ async def dub_video(w, vid: str, doc: LinesDoc, translation: asyncio.Task) -> No
         )
         await asyncio.to_thread(hls.encode_segment, wav, paths.seg("ja", c), chunk.start)
         w.db.chunk_done(vid, c)
+        w.clock.dubbed(doc, chunk, time.time() - t0)
         log.info(
             "%s chunk %d/%d dubbed in %.1fs (%.1fs audio)", vid, c + 1, n, time.time() - t0, chunk.duration
         )

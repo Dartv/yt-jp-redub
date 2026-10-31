@@ -10,6 +10,18 @@ def job_status(w, video_id: str) -> dict | None:
     doc = w.doc(video_id)
     done = w.db.done_chunks(video_id)
     pending = [j["video_id"] for j in w.db.pending_jobs()]
+    # seconds until each chunk is dubbed; only known for the video being dubbed now
+    eta = (
+        w.clock.ready_in(
+            video_id,
+            doc,
+            done,
+            w.sched.order(video_id, len(doc.chunks)),
+            w.sched.urgent(video_id, len(doc.chunks)),
+        )
+        if doc and video_id == w.current
+        else {}
+    )
     out = {
         "video_id": video_id,
         "title": job["title"],
@@ -22,7 +34,12 @@ def job_status(w, video_id: str) -> dict | None:
         "total_lines": job["total_lines"],
         "chunks_done": len(done),
         "chunks_total": len(doc.chunks) if doc else 0,
-        "chunks": [[c.start, c.end, c.id in done] for c in doc.chunks] if doc else [],
+        # [start, end, dubbed, seconds until dubbed (0 when dubbed, None when unknown)]
+        "chunks": [
+            [c.start, c.end, c.id in done, 0 if c.id in done else _round(eta.get(c.id))] for c in doc.chunks
+        ]
+        if doc
+        else [],
         "subs_complete": doc is not None and job["translated"] >= job["total_lines"],
         "ready": doc is not None and (w.paths(video_id).hls / "video.m3u8").exists(),
         "position": pending.index(video_id) if video_id in pending else None,
@@ -33,6 +50,10 @@ def job_status(w, video_id: str) -> dict | None:
     out["percent"] = percent(out)
     out["download_size"] = download_size(w.paths(video_id))
     return out
+
+
+def _round(x: float | None) -> float | None:
+    return None if x is None else round(x, 1)
 
 
 def download_size(paths) -> int | None:
