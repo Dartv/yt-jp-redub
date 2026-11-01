@@ -60,9 +60,10 @@ Rules:
   assertions, not questions. Vary repeated retorts the way a real speaker would.
 - Everything is read aloud by a Japanese voice: no digits, %, symbols or Latin letters. Write numbers in
   kanji or kana as spoken (九十五パーセント, 六十二台, 一万ドル) and the same way every time, letters in
-  katakana (十二のエー), and English names in katakana. Translate English phrases into real Japanese
-  rather than katakana calques (警備の皆さん、ありがとう, not サンキューセキュリティ). Never split a number or
-  a noun phrase across lines.
+  katakana (十二のエー), and names of people and characters in katakana, Japanese ones too
+  (トガミ・ビャクヤ, not 十神白夜): the voice guesses at the readings of kanji names. Translate English
+  phrases into real Japanese rather than katakana calques (警備の皆さん、ありがとう, not
+  サンキューセキュリティ). Never split a number or a noun phrase across lines.
 - When a glossary of names is given, use its renderings of those names.
 - Fillers like "uh", "um" become natural Japanese fillers (えっと, あの) or are dropped; a line that is only
   filler still gets a short one, never an empty string.
@@ -72,8 +73,10 @@ Rules:
 
 
 GLOSSARY_INSTRUCTIONS = """List the proper names in this English video transcript (people, channels, places,
-companies, products, games, shows, events) with how a Japanese dub should say them: the established Japanese
-name where there is one (小国町, モンティ・パイソン), otherwise katakana. The transcript is automatic: names
+companies, products, games, shows, events) with how a Japanese dub should say them. People and characters
+always in katakana, Japanese ones too, in Japanese name order (Byakuya Togami: トガミ・ビャクヤ, not
+十神白夜), because the voice guesses at the readings of kanji names. Other names: the established Japanese
+name where there is one (モンティ・パイソン, 東京), otherwise katakana. The transcript is automatic: names
 are often misheard, so give the real name as the key wherever the context or the title makes it clear.
 Only proper names: no ordinary words, phrases or concepts (their translation depends on context), no digits
 or Latin letters in the Japanese. At most 30 entries.
