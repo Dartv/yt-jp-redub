@@ -92,6 +92,25 @@ def encode_segment(wav: Path, out: Path, start_sec: float, bitrate: str = "160k"
     out.with_suffix(".part").replace(out)
 
 
+def adts_frame_ends(seg: bytes) -> list[int]:
+    """Byte offsets where each ADTS frame of an encoded segment ends (after the ID3 tag)."""
+    i = 10 + int.from_bytes(bytes(b & 0x7F for b in seg[6:10]), "big") if seg[:3] == b"ID3" else 0
+    ends = []
+    while i + 7 <= len(seg) and seg[i] == 0xFF and seg[i + 1] & 0xF0 == 0xF0:
+        i += ((seg[i + 3] & 3) << 11) | (seg[i + 4] << 3) | (seg[i + 5] >> 5)
+        ends.append(i)
+    return ends
+
+
+def tile(seg: bytes, start: float, end: float, sr: int = ff.SR) -> bytes:
+    """A segment cut to whole frames up to round(end*sr/1024). hls.js lays audio segments end to end,
+    ignoring their timestamps, so the encoder's priming and padding (~35 ms a segment) would add up
+    to seconds of lag over a long video; cut, the delay stays one priming frame (23 ms)."""
+    keep = round(end * sr / AAC_PRIMING) - round(start * sr / AAC_PRIMING)
+    ends = adts_frame_ends(seg)
+    return seg[: ends[keep - 1]] if 0 < keep <= len(ends) else seg
+
+
 def encode_en_segments(paths: VideoPaths, doc: LinesDoc) -> None:
     """Original-audio rendition, cut on the same chunk boundaries as the dub."""
     tmp = paths.hls / "_en_tmp.wav"

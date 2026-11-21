@@ -553,6 +553,22 @@ def test_offline_file_packages_without_reencoding(tmp_path):
     assert abs(ff.duration(paths.dub_audio) - 4.0) < 0.05  # the joined dub keeps the video's length
 
 
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+def test_audio_segments_tile_the_timeline(tmp_path):
+    from yt_jp_redub.pipeline import ff
+
+    bounds = [0.0, 1.337, 2.9, 4.71, 6.02]  # chunk lengths that aren't whole AAC frames
+    total = 0.0
+    for start, end in itertools.pairwise(bounds):
+        wav, seg = tmp_path / "c.wav", tmp_path / "c.aac"
+        ff.run_ffmpeg(["-f", "lavfi", "-i", f"sine=duration={end - start}", "-ar", str(ff.SR), str(wav)])
+        hls.encode_segment(wav, seg, start)
+        raw = seg.read_bytes()
+        assert len(hls.adts_frame_ends(raw)) * 1024 / ff.SR > end - start + 0.02  # priming and padding
+        total += len(hls.adts_frame_ends(hls.tile(raw, start, end))) * 1024 / ff.SR
+        assert abs(total - end) <= 512 / ff.SR  # played end to end, no drift builds up
+
+
 def test_qr_renderings():
     from yt_jp_redub import qr
 

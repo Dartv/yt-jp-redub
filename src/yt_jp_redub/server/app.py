@@ -299,7 +299,9 @@ def build_app(cfg: Config, worker: Worker, asb=None) -> web.Application:
                 await worker.wait_change(min(2.0, max(0.1, deadline - time.monotonic())))
         if not p.exists():
             raise web.HTTPServiceUnavailable(text="not dubbed yet", headers={"Retry-After": "2", **NO_STORE})
-        return web.FileResponse(p, headers={"Content-Type": "audio/aac", "Cache-Control": "no-cache"})
+        c = doc.chunks[n]
+        body = hls.tile(p.read_bytes(), c.start, c.end)
+        return web.Response(body=body, headers={"Content-Type": "audio/aac", "Cache-Control": "no-cache"})
 
     async def subtitle(req):
         _, paths = media_paths(req)
